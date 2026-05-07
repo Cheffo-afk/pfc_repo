@@ -1,0 +1,118 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model userData {
+  userId            Int                   @id @default(autoincrement()) @map("userId")
+  email             String                @unique @db.VarChar(255)
+  password          String                @db.VarChar(255)
+  username          String                @map("Username") @db.VarChar(80)
+  role              UserRole              @default(user)
+  mustChangePassword Boolean              @default(true)
+  subscribed        SubscriptionStatus    @default(active)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  userStateRef      userState?
+  anagraphicsRef    anagraphics?
+  roomMemberships   roomParticipant[]
+  sentRoomMessages  roomMessage[]         @relation("RoomMessageSender")
+
+  @@map("userData")
+}
+
+model anagraphics {
+  anagraphicsId  Int      @id @default(autoincrement())
+  userId         Int      @unique @map("userId")
+  nome           String   @map("Nome") @db.VarChar(120)
+  cognome        String   @map("Cognome") @db.VarChar(120)
+  telefono       String?  @map("Telefono") @db.VarChar(30)
+  indirizzo      String?  @map("Indirizzo") @db.VarChar(255)
+  fotoProfilo    String   @map("FotoProfilo") @db.VarChar(255)
+
+  userData       userData @relation(fields: [userId], references: [userId], onDelete: Restrict)
+
+  @@map("anagraphics")
+}
+
+model userState {
+  stateId    Int              @id @default(autoincrement())
+  userID     Int              @unique @map("userID")
+  userData   userData         @relation(fields: [userID], references: [userId], onDelete: Restrict)
+  status     UserOnlineState  @default(offline) @map("userState")
+  lastOnline DateTime         @default(now()) @updatedAt
+
+  @@map("userState")
+}
+
+model chatRoom {
+  roomId        Int               @id @default(autoincrement())
+  roomType      RoomType          @default(direct)
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  participants  roomParticipant[]
+  messages      roomMessage[]
+
+  @@map("chatRoom")
+}
+
+model roomParticipant {
+  roomParticipantId  Int       @id @default(autoincrement())
+  roomId             Int
+  userId             Int
+  joinedAt           DateTime  @default(now())
+
+  room               chatRoom  @relation(fields: [roomId], references: [roomId], onDelete: Restrict)
+  user               userData  @relation(fields: [userId], references: [userId], onDelete: Restrict)
+
+  @@unique([roomId, userId])
+  @@index([userId])
+  @@map("roomParticipant")
+}
+
+model roomMessage {
+  messageId   Int       @id @default(autoincrement())
+  roomId      Int
+  senderId    Int
+  content     String    @db.Text
+  sentAt      DateTime  @default(now())
+  readAt      DateTime?
+  isDeleted   Boolean   @default(false)
+
+  room        chatRoom  @relation(fields: [roomId], references: [roomId], onDelete: Restrict)
+  sender      userData  @relation("RoomMessageSender", fields: [senderId], references: [userId], onDelete: Restrict)
+
+  @@index([roomId, sentAt])
+  @@index([senderId, sentAt])
+  @@map("roomMessage")
+}
+
+enum UserOnlineState {
+  online
+  offline
+  nonAlComputer @map("non al computer")
+}
+
+enum SubscriptionStatus {
+  active
+  inactive
+}
+
+enum UserRole {
+  admin
+  user
+}
+
+enum RoomType {
+  direct
+  group
+}
