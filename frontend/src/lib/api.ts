@@ -127,15 +127,6 @@ export async function logout() {
   }
 }
 
-// logout-all chiude la sessione su tutti i dispositivi (revoca cookie server-side).
-export async function logoutAll() {
-  try {
-    await apiClient.post('/auth/logout-all')
-  } catch (error) {
-    throwApiError(error)
-  }
-}
-
 export async function getMe() {
   try {
     const { data } = await apiClient.get<AuthUser>('/auth/me')

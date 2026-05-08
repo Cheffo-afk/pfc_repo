@@ -2,7 +2,6 @@ import { Router } from "express";
 import {
   loginHandler,
   logoutHandler,
-  logoutAllHandler,
   meHandler,
   changePasswordHandler,
 } from "../auth/handlers";
@@ -18,10 +17,6 @@ authRoutes.post("/auth/login", (req, res) => {
 
 authRoutes.post("/auth/logout", (req, res) => {
   void logoutHandler(req, res);
-});
-
-authRoutes.post("/auth/logout-all", (req, res) => {
-  void logoutAllHandler(req, res);
 });
 
 authRoutes.get("/auth/me", (req, res) => {

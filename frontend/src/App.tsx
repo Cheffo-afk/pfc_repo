@@ -3,6 +3,7 @@ import {
   Badge,
   Box,
   Button,
+  CircularProgress,
   Container,
   Stack,
   Toolbar,
@@ -11,17 +12,38 @@ import {
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { useState, useEffect } from 'react'
-import LoginPage from './pages/LoginPage'
-import LandingPage from './pages/LandingPage'
-import RegisterPage from './pages/RegisterPage'
-import AdminPage from './pages/AdminPage'
-import SubscribersManagementPage from './pages/SubscribersManagementPage'
-import UserPage from './pages/UserPage'
-import UserProfilePage from './pages/UserProfilePage'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useThemeMode } from './theme/useThemeMode'
 import { getAdminUsers, getMe } from './lib/api'
 import { RouteGuard } from './lib/RouteGuard'
+
+const LoginPage = lazy(() => import('./pages/LoginPage'))
+const LandingPage = lazy(() => import('./pages/LandingPage'))
+const RegisterPage = lazy(() => import('./pages/RegisterPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+const SubscribersManagementPage = lazy(() => import('./pages/SubscribersManagementPage'))
+const UserPage = lazy(() => import('./pages/UserPage'))
+const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
+
+function PageLoader() {
+  return (
+    <Box
+      sx={{
+        minHeight: '50vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
+        <CircularProgress size={28} />
+        <Typography variant="body2" color="text.secondary">
+          Caricamento pagina...
+        </Typography>
+      </Stack>
+    </Box>
+  )
+}
 
 // ─── Stato navbar e ruolo ─────────────────────────────────────────────────────
 // La navbar globale è visibile solo sulle pagine pubbliche, scorrendo verso l'alto.
@@ -173,44 +195,46 @@ function App() {
 
       <Box sx={{ flex: 1 }}>
           {/* ── Rotte applicazione ──────────────────────────────────────── */}
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/admin"
-            element={(
-              <RouteGuard requiredRole="admin">
-                <AdminPage />
-              </RouteGuard>
-            )}
-          />
-          <Route
-            path="/admin/gestione-iscritti"
-            element={(
-              <RouteGuard requiredRole="admin">
-                <SubscribersManagementPage />
-              </RouteGuard>
-            )}
-          />
-          <Route
-            path="/user"
-            element={(
-              <RouteGuard>
-                <UserPage />
-              </RouteGuard>
-            )}
-          />
-          <Route
-            path="/user/profile"
-            element={(
-              <RouteGuard>
-                <UserProfilePage />
-              </RouteGuard>
-            )}
-          />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/admin"
+              element={(
+                <RouteGuard requiredRole="admin">
+                  <AdminPage />
+                </RouteGuard>
+              )}
+            />
+            <Route
+              path="/admin/gestione-iscritti"
+              element={(
+                <RouteGuard requiredRole="admin">
+                  <SubscribersManagementPage />
+                </RouteGuard>
+              )}
+            />
+            <Route
+              path="/user"
+              element={(
+                <RouteGuard>
+                  <UserPage />
+                </RouteGuard>
+              )}
+            />
+            <Route
+              path="/user/profile"
+              element={(
+                <RouteGuard>
+                  <UserProfilePage />
+                </RouteGuard>
+              )}
+            />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </Box>
 
       {/* ── Footer globale ──────────────────────────────────────────────── */}

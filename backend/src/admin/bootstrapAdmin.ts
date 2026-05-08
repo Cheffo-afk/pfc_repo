@@ -12,30 +12,20 @@ export async function ensureAdminUser() {
     return;
   }
 
-  const existing = await prisma.userData.findUnique({
-    where: { email: ADMIN_EMAIL },
-    select: { userId: true },
-  });
-
-  if (existing) {
-    // Evita di resettare la password a ogni riavvio; riallinea solo ruolo/stato anagrafico.
-    await prisma.userData.update({
-      where: { userId: existing.userId },
-      data: {
-        username: ADMIN_USERNAME,
-        role: "admin",
-        subscribed: "active",
-        mustChangePassword: false,
-      },
-      select: { userId: true },
-    });
-    return;
-  }
-
   const hashedPassword = await bcrypt.hash(ADMIN_PASSWORD, 12);
 
-  await prisma.userData.create({
-    data: {
+  // Allinea sempre il profilo admin ai valori configurati via .env.
+  await prisma.userData.upsert({
+    where: { email: ADMIN_EMAIL },
+    update: {
+      email: ADMIN_EMAIL,
+      username: ADMIN_USERNAME,
+      password: hashedPassword,
+      role: "admin",
+      subscribed: "active",
+      mustChangePassword: false,
+    },
+    create: {
       email: ADMIN_EMAIL,
       username: ADMIN_USERNAME,
       password: hashedPassword,

@@ -62,20 +62,6 @@ export async function logoutHandler(req: express.Request, res: express.Response)
   });
 }
 
-// ______ POST /auth/logout-all — alias di logout (sessione unica, stesso comportamento) ______
-export async function logoutAllHandler(req: express.Request, res: express.Response) {
-  req.session.destroy((err) => {
-    if (err) {
-      res.status(500).json({ error: "Impossibile chiudere la sessione" });
-      return;
-    }
-
-    const response: ApiMessageResponse = { ok: true, message: "Sessione revocata" };
-    res.clearCookie(process.env.SESSION_COOKIE_NAME ?? "sid");
-    res.status(200).json(response);
-  });
-}
-
 // ______ GET /auth/me — ritorna il profilo completo dell'utente loggato ______
 // ______ Include anagrafica (nome, cognome, telefono, indirizzo, fotoProfilo) ______
 export async function meHandler(req: express.Request, res: express.Response) {
