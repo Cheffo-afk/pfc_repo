@@ -1,11 +1,13 @@
 $ErrorActionPreference = 'Stop'
 
+# ─── Config ───────────────────────────────────────────────────────────────────
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $backendDir = Join-Path $root 'backend'
 $frontendDir = Join-Path $root 'frontend'
 
 $ports = @(3000, 5173)
 
+# ─── Pulizia porte ───────────────────────────────────────────────────────────
 Write-Host "[dev] Pulizia porte: $($ports -join ', ')" -ForegroundColor Cyan
 foreach ($port in $ports) {
   $listeners = Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction SilentlyContinue
@@ -22,6 +24,7 @@ foreach ($port in $ports) {
   }
 }
 
+# ─── Avvio backend ───────────────────────────────────────────────────────────
 Write-Host '[dev] Avvio backend (porta 3000)...' -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
   '-NoExit',
@@ -30,6 +33,7 @@ Start-Process powershell -ArgumentList @(
   "Set-Location '$backendDir'; npm run dev"
 )
 
+# ─── Attesa backend pronto ───────────────────────────────────────────────────
 Write-Host '[dev] Attendo backend pronto su http://127.0.0.1:3000/auth/me ...' -ForegroundColor Cyan
 $backendReady = $false
 for ($attempt = 1; $attempt -le 45; $attempt++) {
@@ -40,7 +44,7 @@ for ($attempt = 1; $attempt -le 45; $attempt++) {
       break
     }
   } catch {
-    # 401/404 are acceptable signs that HTTP server is alive; check status if available
+    # ─── 401/404 sono risposte valide: il server HTTP è vivo ─────────────────
     $statusCode = $_.Exception.Response.StatusCode.value__
     if ($statusCode -eq 401 -or $statusCode -eq 404) {
       $backendReady = $true
@@ -57,6 +61,7 @@ if (-not $backendReady) {
   Write-Host '[dev] Backend pronto.' -ForegroundColor Green
 }
 
+# ─── Avvio frontend ──────────────────────────────────────────────────────────
 Write-Host '[dev] Avvio frontend (porta 5173 strict)...' -ForegroundColor Green
 Start-Process powershell -ArgumentList @(
   '-NoExit',
