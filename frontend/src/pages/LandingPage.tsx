@@ -61,6 +61,7 @@ export default function LandingPage() {
           'radial-gradient(circle at 10% 10%, rgba(255,211,119,0.35), transparent 35%), radial-gradient(circle at 90% 20%, rgba(134,220,142,0.35), transparent 35%), radial-gradient(circle at 40% 90%, rgba(255,156,156,0.25), transparent 40%)',
         py: { xs: 6, md: 8 },
         pt: { xs: 10.25, md: 12.25 },
+        mb: '10px',
       }}
     >
       <Container maxWidth="lg">

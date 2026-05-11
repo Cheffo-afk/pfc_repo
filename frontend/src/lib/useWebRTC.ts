@@ -6,7 +6,6 @@ const ICE_SERVERS: RTCIceServer[] = [
 ]
 
 // ─── Re-export tipi ───────────────────────────────────────────────────────────
-export type { CallState, IncomingCallInfo } from '../types'
 import type { CallState, IncomingCallInfo } from '../types'
 
 // Tipi interni — usati solo per serializzare SDP/ICE sul canale signaling.

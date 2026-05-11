@@ -51,6 +51,22 @@ export type AdminToggleSubscriptionResponse = {
   message: string
 }
 
+export type AdminCreateUserInput = {
+  nome: string
+  cognome: string
+  username: string
+  email: string
+  initialPassword: string
+}
+
+export type AdminCreateUserResponse = {
+  userId: number
+  email: string
+  username: string
+  role: 'user'
+  mustChangePassword: boolean
+}
+
 export type RegisterRequestInput = {
   nome: string
   cognome: string
@@ -91,6 +107,7 @@ export type PublicUser = {
   email: string
   mustChangePassword: boolean
   createdAt: string
+  unreadCount: number
   anagraphicsRef: {
     nome: string
     cognome: string

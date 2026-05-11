@@ -131,7 +131,7 @@ function App() {
     }
   }, [isAdmin])
 
-  const isUserPage = location.pathname.startsWith('/user')
+  const isSpecialPage = location.pathname.startsWith('/user') || location.pathname.startsWith('/admin')
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -143,8 +143,8 @@ function App() {
           backdropFilter: 'blur(10px)',
           borderBottom: '1px solid',
           borderColor: 'divider',
-          transform: (!isUserPage && showNavbar) ? 'translateY(0)' : 'translateY(-100%)',
-          pointerEvents: (!isUserPage && showNavbar) ? 'auto' : 'none',
+          transform: (!isSpecialPage && showNavbar) ? 'translateY(0)' : 'translateY(-100%)',
+          pointerEvents: (!isSpecialPage && showNavbar) ? 'auto' : 'none',
           transition: 'transform 0.3s ease-in-out',
           width: '100%',
           top: 0,

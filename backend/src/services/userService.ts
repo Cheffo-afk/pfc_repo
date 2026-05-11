@@ -1,11 +1,13 @@
+import { unlink } from "fs/promises";
+import { join } from "path";
 import { prisma } from "../lib/prisma";
-import type { PublicUserResponse } from "../types/responses";
-import type { ServiceResult } from "../types/serviceResult";
+import type { PublicUserResponse, ServiceResult } from "../types";
+import { countUnreadDirectMessages } from "../websocket/services/chatRoomService";
 
 // ______ Lista gli utenti attivi (subscribed=active) ordinati per username ______
 // ______ Usata dalla chat per popolare il pannello utenti ______
-export async function listActiveUsers(): Promise<PublicUserResponse[]> {
-  return prisma.userData.findMany({
+export async function listActiveUsers(currentUserId?: number): Promise<PublicUserResponse[]> {
+  const users = await prisma.userData.findMany({
     where: {
       subscribed: "active",
     },
@@ -25,6 +27,17 @@ export async function listActiveUsers(): Promise<PublicUserResponse[]> {
     },
     orderBy: { username: "asc" },
   });
+
+  if (!currentUserId) {
+    return users.map((user) => ({ ...user, unreadCount: 0 }));
+  }
+
+  return Promise.all(
+    users.map(async (user) => ({
+      ...user,
+      unreadCount: user.userId === currentUserId ? 0 : await countUnreadDirectMessages(currentUserId, user.userId),
+    })),
+  );
 }
 
 // ______ Soft delete: porta subscribed=inactive senza rimuovere i dati ______
@@ -64,6 +77,13 @@ export async function updateProfilePicture(userId: number, relativePath: string)
     return false;
   }
 
+  const previous = await prisma.anagraphics.findUnique({
+    where: { userId },
+    select: { fotoProfilo: true },
+  });
+
+  const previousPath = previous?.fotoProfilo;
+
   await prisma.anagraphics.upsert({
     where: { userId },
     update: { fotoProfilo: relativePath },
@@ -74,6 +94,24 @@ export async function updateProfilePicture(userId: number, relativePath: string)
       fotoProfilo: relativePath,
     },
   });
+
+  // Elimina il vecchio file fisico solo se era un upload utente e non il placeholder.
+  if (
+    previousPath &&
+    previousPath !== relativePath &&
+    previousPath !== "default-profile.png" &&
+    previousPath.startsWith("/uploads/profiles/")
+  ) {
+    const absoluteOldPath = join(process.cwd(), previousPath.replace(/^\/+/, ""));
+    try {
+      await unlink(absoluteOldPath);
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code !== "ENOENT") {
+        console.warn("Impossibile eliminare la vecchia foto profilo:", absoluteOldPath, err.message);
+      }
+    }
+  }
 
   return true;
 }

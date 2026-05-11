@@ -45,7 +45,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, pt: { xs: 10.125, md: 11.125 } }}>
+    <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, pt: { xs: 10.125, md: 11.125 }, mb: '10px' }}>
       <Container maxWidth="sm">
         <Stack spacing={2.5}>
           <Card>

@@ -5,6 +5,7 @@ import type { ClientMessage, ServerMessage } from "../types";
 import {
   getDirectHistoryPage,
   persistDirectMessage,
+  markDirectMessagesAsRead,
   HISTORY_LIMIT,
 } from "../services/chatRoomService";
 import { isOpen } from "../utils";
@@ -54,6 +55,32 @@ function extractBeforeMessageId(payload: unknown): number | undefined {
   }
 
   return candidate.beforeMessageId;
+}
+
+function resolveConnectedClientId(context: WsContext, userId: number) {
+  const preferredClientId = context.userIdToClient.get(userId);
+  if (preferredClientId) {
+    const preferredSocket = context.clients.get(preferredClientId);
+    if (preferredSocket && isOpen(preferredSocket)) {
+      return preferredClientId;
+    }
+  }
+
+  for (const [candidateClientId, mappedUserId] of context.clientToUserId.entries()) {
+    if (mappedUserId !== userId) {
+      continue;
+    }
+
+    const candidateSocket = context.clients.get(candidateClientId);
+    if (!candidateSocket || !isOpen(candidateSocket)) {
+      continue;
+    }
+
+    context.userIdToClient.set(userId, candidateClientId);
+    return candidateClientId;
+  }
+
+  return null;
 }
 
 export function handleChatMessage(
@@ -126,6 +153,8 @@ export function handleChatMessage(
         beforeMessageId,
       );
 
+      await markDirectMessagesAsRead(fromUserId, toUser.userId);
+
       send(socket, {
         channel: "chat",
         action: "history",
@@ -173,7 +202,7 @@ export function handleChatMessage(
     };
 
     // ______ Routing 1-to-1 via userId per evitare collisioni su username non unique ______
-    const targetClientId = context.userIdToClient.get(toUser.userId);
+    const targetClientId = resolveConnectedClientId(context, toUser.userId);
     const targetSocket = targetClientId
       ? context.clients.get(targetClientId)
       : undefined;

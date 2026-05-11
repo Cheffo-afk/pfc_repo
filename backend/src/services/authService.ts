@@ -1,7 +1,6 @@
 import bcrypt from "bcrypt";
 import { prisma } from "../lib/prisma";
-import type { ServiceResult } from "../types/serviceResult";
-import type { AuthUserResponse } from "../types/responses";
+import type { ServiceResult, AuthUserResponse } from "../types";
 
 // ______ Verifica credenziali email/password e ritorna i dati utente se valide ______
 // ______ Ritorna null se l'utente non esiste, e' inattivo o la password e' errata ______

@@ -12,7 +12,7 @@ import type {
   AdminCreateUserResponse,
   ApiMessageResponse,
   ToggleSubscriptionResponse,
-} from "../types/responses";
+} from "../types";
 import {
   AdminCreateUserSchema,
   InitialPasswordSchema,

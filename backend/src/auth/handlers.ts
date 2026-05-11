@@ -10,7 +10,7 @@ import type {
   ApiMessageResponse,
   AuthSessionResponse,
   RegisterRequestResponse,
-} from "../types/responses";
+} from "../types";
 import {
   LoginSchema,
   ChangePasswordSchema,

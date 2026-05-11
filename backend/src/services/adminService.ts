@@ -3,8 +3,8 @@ import { prisma } from "../lib/prisma";
 import type {
   AdminCreateUserResponse,
   AdminUserResponse,
-} from "../types/responses";
-import type { ServiceResult } from "../types/serviceResult";
+  ServiceResult,
+} from "../types";
 
 // ______ Lista tutti gli utenti con ruolo 'user' con anagrafica e stato presenza ______
 // ______ Usata dal pannello admin per visualizzare e gestire gli iscritti ______
@@ -47,6 +47,8 @@ export async function listAdminUsers(): Promise<AdminUserResponse[]> {
 // ______ Crea un utente con password iniziale gia' impostata dall'admin ______
 // ______ L'utente e' creato active e con mustChangePassword=true ______
 export async function createUserByAdmin(input: {
+  nome: string;
+  cognome: string;
   email: string;
   username: string;
   initialPassword: string;
@@ -62,6 +64,18 @@ export async function createUserByAdmin(input: {
         role: "user",
         subscribed: "active",
         mustChangePassword: true,
+        anagraphicsRef: {
+          create: {
+            nome: input.nome,
+            cognome: input.cognome,
+            fotoProfilo: "default-profile.png",
+          },
+        },
+        userStateRef: {
+          create: {
+            status: "offline",
+          },
+        },
       },
       select: {
         userId: true,

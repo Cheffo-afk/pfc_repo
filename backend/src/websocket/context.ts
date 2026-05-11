@@ -9,7 +9,7 @@ export type WsContext = {
   statuses: Map<string, PresenceStatus>;
   // ______ clientId -> userId (interno, mai esposto ai client) ______
   clientToUserId: Map<string, number>;
-  // ______ userId -> clientId (lookup veloce per sessione utente) ______
+  // ______ userId -> clientId preferito (puo' esistere piu' di un socket per userId) ______
   userIdToClient: Map<number, string>;
   // ______ clientId -> username pubblico ______
   clientToUsername: Map<string, string>;

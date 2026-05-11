@@ -57,13 +57,6 @@ async function bindSocketToUser(
     };
   }
 
-  // ______ Se l'utente aveva una vecchia sessione socket, pulisce i mapping precedenti ______
-  const previousClientId = context.userIdToClient.get(user.userId);
-  if (previousClientId && previousClientId !== clientId) {
-    context.clientToUserId.delete(previousClientId);
-    context.clientToUsername.delete(previousClientId);
-  }
-
   // ______ Salva mapping interni per routing e lookup veloce ______
   context.clientToUserId.set(clientId, user.userId);
   context.userIdToClient.set(user.userId, clientId);
@@ -79,6 +72,25 @@ async function bindSocketToUser(
       status: "online",
     },
   };
+}
+
+function findReplacementClientId(
+  context: WsContext,
+  userId: number,
+  closingClientId: string,
+) {
+  for (const [candidateClientId, mappedUserId] of context.clientToUserId.entries()) {
+    if (mappedUserId !== userId || candidateClientId === closingClientId) {
+      continue;
+    }
+
+    const candidateSocket = context.clients.get(candidateClientId);
+    if (candidateSocket && isOpen(candidateSocket)) {
+      return candidateClientId;
+    }
+  }
+
+  return null;
 }
 
 export function initWebSocket(
@@ -238,7 +250,20 @@ export function initWebSocket(
 
         const mappedUserId = context.clientToUserId.get(clientId);
         if (mappedUserId) {
-          context.userIdToClient.delete(mappedUserId);
+          const preferredClientId = context.userIdToClient.get(mappedUserId);
+          if (preferredClientId === clientId) {
+            const replacementClientId = findReplacementClientId(
+              context,
+              mappedUserId,
+              clientId,
+            );
+
+            if (replacementClientId) {
+              context.userIdToClient.set(mappedUserId, replacementClientId);
+            } else {
+              context.userIdToClient.delete(mappedUserId);
+            }
+          }
         }
 
         // ______ Pulisce tutte le mappe runtime legate al client scollegato ______

@@ -6,23 +6,8 @@ import type {
   AuthResponse,
   AdminUser,
   AdminToggleSubscriptionResponse,
-  RegisterRequestInput,
-  RegisterRequestResponse,
-  UpdateMyProfileInput,
-  ActivateUserResponse,
-  SetInitialPasswordResponse,
-  ProfilePictureUploadResponse,
-  PublicUser,
-} from '../types'
-
-// Re-esporta tutti i tipi di dominio in modo che i consumer possano importarli
-// direttamente da questo modulo senza conoscere la cartella types/.
-export type {
-  HealthResponse,
-  AuthUser,
-  AuthResponse,
-  AdminUser,
-  AdminToggleSubscriptionResponse,
+  AdminCreateUserInput,
+  AdminCreateUserResponse,
   RegisterRequestInput,
   RegisterRequestResponse,
   UpdateMyProfileInput,
@@ -168,6 +153,15 @@ export async function updateMyProfile(input: UpdateMyProfileInput) {
 export async function getAdminUsers() {
   try {
     const { data } = await apiClient.get<AdminUser[]>('/admin/users')
+    return data
+  } catch (error) {
+    throwApiError(error)
+  }
+}
+
+export async function createAdminUser(input: AdminCreateUserInput) {
+  try {
+    const { data } = await apiClient.post<AdminCreateUserResponse>('/admin/users', input)
     return data
   } catch (error) {
     throwApiError(error)

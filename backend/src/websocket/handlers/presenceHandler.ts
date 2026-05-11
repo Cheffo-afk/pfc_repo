@@ -32,23 +32,61 @@ function isPresenceStatus(value: unknown): value is PresenceStatus {
   );
 }
 
+function getStatusPriority(status: PresenceStatus) {
+  if (status === "online") return 3;
+  if (status === "nonAlComputer") return 2;
+  return 1;
+}
+
+function getAggregatedUserStatus(
+  context: WsContext,
+  userId: number,
+  excludeClientId?: string,
+): PresenceStatus {
+  let best: PresenceStatus | null = null;
+
+  for (const [mappedClientId, mappedUserId] of context.clientToUserId.entries()) {
+    if (mappedUserId !== userId) {
+      continue;
+    }
+
+    if (excludeClientId && mappedClientId === excludeClientId) {
+      continue;
+    }
+
+    const candidate = context.statuses.get(mappedClientId) ?? "offline";
+    if (!best || getStatusPriority(candidate) > getStatusPriority(best)) {
+      best = candidate;
+    }
+  }
+
+  return best ?? "offline";
+}
+
+function buildPublicPresenceSnapshot(context: WsContext) {
+  const byUsername = new Map<string, PresenceStatus>();
+
+  for (const [clientId, status] of context.statuses.entries()) {
+    const username = context.clientToUsername.get(clientId);
+    if (!username) {
+      continue;
+    }
+
+    const previous = byUsername.get(username);
+    if (!previous || getStatusPriority(status) > getStatusPriority(previous)) {
+      byUsername.set(username, status);
+    }
+  }
+
+  return Array.from(byUsername.entries()).map(([username, status]) => ({
+    username,
+    status,
+  }));
+}
+
 function broadcastStatuses(context: WsContext) {
   // ______ Expose only public presence data ______
-  const users = Array.from(context.statuses.entries())
-    .map(([clientId, status]) => {
-      const username = context.clientToUsername.get(clientId);
-      if (!username) {
-        return null;
-      }
-
-      return {
-        username,
-        status,
-      };
-    })
-    .filter((entry): entry is { username: string; status: PresenceStatus } =>
-      entry !== null,
-    );
+  const users = buildPublicPresenceSnapshot(context);
 
   context.clients.forEach((clientSocket) => {
     send(clientSocket, {
@@ -80,7 +118,8 @@ export async function handlePresenceMessage(
     // ______ Persist user presence when the socket is mapped to a real user ______
     const userId = context.clientToUserId.get(clientId);
     if (userId) {
-      await upsertUserState(userId, message.payload);
+      const aggregate = getAggregatedUserStatus(context, userId);
+      await upsertUserState(userId, aggregate);
     }
     broadcastStatuses(context);
     return;
@@ -88,21 +127,7 @@ export async function handlePresenceMessage(
 
   // ______ Richiesta snapshot dello stato utenti online/offline ______
   if (message.action === "snapshot") {
-    const users = Array.from(context.statuses.entries())
-      .map(([mappedClientId, status]) => {
-        const username = context.clientToUsername.get(mappedClientId);
-        if (!username) {
-          return null;
-        }
-
-        return {
-          username,
-          status,
-        };
-      })
-      .filter((entry): entry is { username: string; status: PresenceStatus } =>
-        entry !== null,
-      );
+    const users = buildPublicPresenceSnapshot(context);
 
     send(socket, {
       channel: "presence",
@@ -124,7 +149,8 @@ export async function markClientOnline(context: WsContext, clientId: string) {
   context.statuses.set(clientId, "online");
   const userId = context.clientToUserId.get(clientId);
   if (userId) {
-    await upsertUserState(userId, "online");
+    const aggregate = getAggregatedUserStatus(context, userId);
+    await upsertUserState(userId, aggregate);
   }
   broadcastStatuses(context);
 }
@@ -134,7 +160,8 @@ export async function markClientOffline(context: WsContext, clientId: string) {
   context.statuses.set(clientId, "offline");
   const userId = context.clientToUserId.get(clientId);
   if (userId) {
-    await upsertUserState(userId, "offline");
+    const aggregate = getAggregatedUserStatus(context, userId, clientId);
+    await upsertUserState(userId, aggregate);
   }
   broadcastStatuses(context);
 }

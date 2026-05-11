@@ -69,6 +69,32 @@ function normalizeSignalingPayload(
   return normalized;
 }
 
+function resolveConnectedClientId(context: WsContext, userId: number) {
+  const preferredClientId = context.userIdToClient.get(userId);
+  if (preferredClientId) {
+    const preferredSocket = context.clients.get(preferredClientId);
+    if (preferredSocket && isOpen(preferredSocket)) {
+      return preferredClientId;
+    }
+  }
+
+  for (const [candidateClientId, mappedUserId] of context.clientToUserId.entries()) {
+    if (mappedUserId !== userId) {
+      continue;
+    }
+
+    const candidateSocket = context.clients.get(candidateClientId);
+    if (!candidateSocket || !isOpen(candidateSocket)) {
+      continue;
+    }
+
+    context.userIdToClient.set(userId, candidateClientId);
+    return candidateClientId;
+  }
+
+  return null;
+}
+
 export function handleSignalingMessage(
   context: WsContext,
   clientId: string,
@@ -120,7 +146,7 @@ export function handleSignalingMessage(
   }
 
   // ______ Destinatario risolto su mappa userId -> client attivo ______
-  const targetClientId = context.userIdToClient.get(toUserId);
+  const targetClientId = resolveConnectedClientId(context, toUserId);
   if (!targetClientId) {
     send(socket, {
       channel: "signaling",

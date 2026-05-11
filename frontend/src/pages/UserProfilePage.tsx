@@ -10,6 +10,7 @@ import {
   Container,
   Divider,
   IconButton,
+  Slider,
   Stack,
   TextField,
   Toolbar,
@@ -20,15 +21,21 @@ import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import LockRoundedIcon from '@mui/icons-material/LockRounded'
-import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { changePassword, getMe, logout, updateMyProfile, uploadProfilePicture, type AuthUser } from '../lib/api'
+import { changePassword, getMe, logout, updateMyProfile, uploadProfilePicture } from '../lib/api'
+import { disconnectWebSocket } from '../lib/useWebSocket'
 import { useThemeMode } from '../theme/useThemeMode'
+import type { AuthUser } from '../types'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase()
 }
+
+const AVATAR_CROP_STAGE_SIZE = 360
+const AVATAR_CROP_HOLE_SIZE = 220
+const AVATAR_EXPORT_SIZE = 512
 
 // Chiave localStorage per la descrizione utente: isolata per userId
 // per evitare collisioni tra utenti diversi sullo stesso browser.
@@ -55,6 +62,15 @@ export default function UserProfilePage() {
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileFeedback, setProfileFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
+  const [cropOverlayOpen, setCropOverlayOpen] = useState(false)
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null)
+  const [cropImageNatural, setCropImageNatural] = useState<{ width: number; height: number } | null>(null)
+  const [cropBaseScale, setCropBaseScale] = useState(1)
+  const [cropZoom, setCropZoom] = useState(1)
+  const [cropOffset, setCropOffset] = useState({ x: 0, y: 0 })
+  const [isCropDragging, setIsCropDragging] = useState(false)
+  const dragStateRef = useRef<{ pointerId: number; startX: number; startY: number; startOffsetX: number; startOffsetY: number } | null>(null)
+  const cropPointerTargetRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   // ─── Form profilo ─────────────────────────────────────────────────────────
   // descrizione è salvata solo in localStorage (non nel DB) per evitare
@@ -97,6 +113,7 @@ export default function UserProfilePage() {
 
   // ─── Azioni ───────────────────────────────────────────────────────────────
   async function handleLogout() {
+    disconnectWebSocket()
     await logout()
     navigate('/login')
   }
@@ -185,7 +202,30 @@ export default function UserProfilePage() {
     return path.startsWith('/') ? path : `/uploads/profiles/${path}`
   }
 
-  // Upload diretto: il file viene validato lato client prima dell'invio.
+  function clampCropOffset(x: number, y: number, natural: { width: number; height: number }, scale: number) {
+    const scaledWidth = natural.width * scale
+    const scaledHeight = natural.height * scale
+    const maxX = Math.max(0, (scaledWidth - AVATAR_CROP_HOLE_SIZE) / 2)
+    const maxY = Math.max(0, (scaledHeight - AVATAR_CROP_HOLE_SIZE) / 2)
+
+    return {
+      x: Math.min(maxX, Math.max(-maxX, x)),
+      y: Math.min(maxY, Math.max(-maxY, y)),
+    }
+  }
+
+  function resetCropState() {
+    setCropOverlayOpen(false)
+    setCropImageSrc(null)
+    setCropImageNatural(null)
+    setCropBaseScale(1)
+    setCropZoom(1)
+    setCropOffset({ x: 0, y: 0 })
+    setIsCropDragging(false)
+    dragStateRef.current = null
+  }
+
+  // Selezione file: apre l'overlay di ritaglio prima dell'upload.
   async function handleAvatarFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0]
     if (!file || !user) {
@@ -199,20 +239,180 @@ export default function UserProfilePage() {
     }
 
     try {
-      setAvatarUploading(true)
       setProfileFeedback(null)
-      await uploadProfilePicture(user.userId, file)
-      const me = await getMe()
-      setUser(me)
-      setProfileFeedback({ type: 'success', text: 'Immagine profilo aggiornata con successo.' })
+      const reader = new FileReader()
+      reader.onload = () => {
+        if (typeof reader.result !== 'string') {
+          setProfileFeedback({ type: 'error', text: 'Impossibile leggere il file selezionato.' })
+          return
+        }
+
+        setCropImageSrc(reader.result)
+        setCropImageNatural(null)
+        setCropBaseScale(1)
+        setCropZoom(1)
+        setCropOffset({ x: 0, y: 0 })
+        setCropOverlayOpen(true)
+      }
+      reader.readAsDataURL(file)
     } catch (error) {
       setProfileFeedback({
         type: 'error',
-        text: error instanceof Error ? error.message : 'Errore durante upload immagine profilo.',
+        text: error instanceof Error ? error.message : 'Errore durante la selezione immagine.',
+      })
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  function handleCropImageLoad(event: SyntheticEvent<HTMLImageElement>) {
+    const img = event.currentTarget
+    const natural = { width: img.naturalWidth, height: img.naturalHeight }
+    const nextScale = Math.max(
+      AVATAR_CROP_HOLE_SIZE / natural.width,
+      AVATAR_CROP_HOLE_SIZE / natural.height,
+    )
+
+    setCropImageNatural(natural)
+    setCropBaseScale(nextScale)
+    setCropZoom(1)
+    setCropOffset({ x: 0, y: 0 })
+  }
+
+  function handleCropZoomChange(_event: Event, value: number | number[]) {
+    if (!cropImageNatural) {
+      return
+    }
+
+    const nextZoom = Array.isArray(value) ? value[0] : value
+    const nextScale = cropBaseScale * nextZoom
+    const nextOffset = clampCropOffset(cropOffset.x, cropOffset.y, cropImageNatural, nextScale)
+
+    setCropZoom(nextZoom)
+    setCropOffset(nextOffset)
+  }
+
+  function handleCropPointerDown(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!cropImageNatural) {
+      return
+    }
+
+    event.preventDefault()
+    cropPointerTargetRef.current = event.currentTarget
+    event.currentTarget.setPointerCapture(event.pointerId)
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startOffsetX: cropOffset.x,
+      startOffsetY: cropOffset.y,
+    }
+    setIsCropDragging(true)
+  }
+
+  function handleCropPointerMove(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragStateRef.current
+    if (!drag || drag.pointerId !== event.pointerId || !cropImageNatural) {
+      return
+    }
+
+    const currentScale = cropBaseScale * cropZoom
+
+    const next = clampCropOffset(
+      drag.startOffsetX + (event.clientX - drag.startX),
+      drag.startOffsetY + (event.clientY - drag.startY),
+      cropImageNatural,
+      currentScale,
+    )
+
+    setCropOffset(next)
+  }
+
+  function handleCropPointerUp(event: ReactPointerEvent<HTMLDivElement>) {
+    const drag = dragStateRef.current
+    if (!drag || drag.pointerId !== event.pointerId) {
+      return
+    }
+
+    if (cropPointerTargetRef.current?.hasPointerCapture(event.pointerId)) {
+      cropPointerTargetRef.current.releasePointerCapture(event.pointerId)
+    }
+
+    dragStateRef.current = null
+    setIsCropDragging(false)
+  }
+
+  async function handleSaveCroppedAvatar() {
+    if (!user || !cropImageSrc || !cropImageNatural) {
+      return
+    }
+
+    try {
+      setAvatarUploading(true)
+      setProfileFeedback(null)
+
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image()
+        img.onload = () => resolve(img)
+        img.onerror = () => reject(new Error('Impossibile caricare l\'immagine selezionata.'))
+        img.src = cropImageSrc
+      })
+
+      const currentScale = cropBaseScale * cropZoom
+
+      const scaledWidth = cropImageNatural.width * currentScale
+      const scaledHeight = cropImageNatural.height * currentScale
+      const imgLeft = (AVATAR_CROP_STAGE_SIZE - scaledWidth) / 2 + cropOffset.x
+      const imgTop = (AVATAR_CROP_STAGE_SIZE - scaledHeight) / 2 + cropOffset.y
+      const holeLeft = (AVATAR_CROP_STAGE_SIZE - AVATAR_CROP_HOLE_SIZE) / 2
+      const holeTop = (AVATAR_CROP_STAGE_SIZE - AVATAR_CROP_HOLE_SIZE) / 2
+
+      const sourceX = Math.max(0, (holeLeft - imgLeft) / currentScale)
+      const sourceY = Math.max(0, (holeTop - imgTop) / currentScale)
+      const sourceSize = AVATAR_CROP_HOLE_SIZE / currentScale
+
+      const canvas = document.createElement('canvas')
+      canvas.width = AVATAR_EXPORT_SIZE
+      canvas.height = AVATAR_EXPORT_SIZE
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        throw new Error('Canvas non disponibile per il ritaglio immagine.')
+      }
+
+      ctx.drawImage(
+        image,
+        sourceX,
+        sourceY,
+        sourceSize,
+        sourceSize,
+        0,
+        0,
+        AVATAR_EXPORT_SIZE,
+        AVATAR_EXPORT_SIZE,
+      )
+
+      const blob = await new Promise<Blob | null>((resolve) => {
+        canvas.toBlob(resolve, 'image/jpeg', 0.92)
+      })
+
+      if (!blob) {
+        throw new Error('Impossibile generare il file immagine ritagliato.')
+      }
+
+      const croppedFile = new File([blob], `avatar_${Date.now()}.jpg`, { type: 'image/jpeg' })
+      await uploadProfilePicture(user.userId, croppedFile)
+
+      const me = await getMe()
+      setUser(me)
+      setProfileFeedback({ type: 'success', text: 'Immagine profilo aggiornata con successo.' })
+      resetCropState()
+    } catch (error) {
+      setProfileFeedback({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Errore durante il salvataggio della foto profilo.',
       })
     } finally {
       setAvatarUploading(false)
-      event.target.value = ''
     }
   }
 
@@ -245,7 +445,7 @@ export default function UserProfilePage() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', mb: '10px' }}>
       <AppBar
         position="fixed"
         color="transparent"
@@ -516,6 +716,131 @@ export default function UserProfilePage() {
           </Card>
         </Stack>
       </Container>
+
+      {cropOverlayOpen && cropImageSrc && (
+        <Box
+          sx={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1700,
+            bgcolor: 'rgba(0, 0, 0, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            p: 2,
+          }}
+        >
+          <Box sx={{ width: 'min(92vw, 520px)', position: 'relative' }}>
+            <Typography
+              role="button"
+              onClick={resetCropState}
+              sx={{
+                position: 'absolute',
+                top: -8,
+                right: 0,
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: '1.35rem',
+                fontWeight: 700,
+                px: 1,
+                zIndex: 2,
+              }}
+            >
+              x
+            </Typography>
+
+            <Box
+              onPointerDown={handleCropPointerDown}
+              onPointerMove={handleCropPointerMove}
+              onPointerUp={handleCropPointerUp}
+              onPointerCancel={handleCropPointerUp}
+              sx={{
+                mt: 4,
+                width: AVATAR_CROP_STAGE_SIZE,
+                height: AVATAR_CROP_STAGE_SIZE,
+                maxWidth: '90vw',
+                maxHeight: '90vw',
+                mx: 'auto',
+                position: 'relative',
+                overflow: 'hidden',
+                bgcolor: '#111',
+                borderRadius: 2,
+                touchAction: 'none',
+                cursor: isCropDragging ? 'grabbing' : 'grab',
+              }}
+            >
+              <Box
+                component="img"
+                src={cropImageSrc}
+                alt="Anteprima ritaglio avatar"
+                onLoad={handleCropImageLoad}
+                draggable={false}
+                sx={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  transform: `translate(-50%, -50%) translate(${cropOffset.x}px, ${cropOffset.y}px) scale(${cropBaseScale * cropZoom})`,
+                  transformOrigin: 'center center',
+                  userSelect: 'none',
+                  WebkitUserDrag: 'none',
+                  pointerEvents: 'none',
+                }}
+              />
+
+              <Box
+                sx={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '50%',
+                  width: AVATAR_CROP_HOLE_SIZE,
+                  height: AVATAR_CROP_HOLE_SIZE,
+                  transform: 'translate(-50%, -50%)',
+                  borderRadius: '50%',
+                  boxShadow: '0 0 0 9999px rgba(0, 0, 0, 0.58)',
+                  border: '2px solid rgba(255,255,255,0.92)',
+                  pointerEvents: 'none',
+                }}
+              />
+            </Box>
+
+            <Box sx={{ width: AVATAR_CROP_STAGE_SIZE, maxWidth: '90vw', mx: 'auto', mt: 1.5, px: 0.5 }}>
+              <Typography variant="caption" sx={{ color: 'rgba(255,255,255,0.92)' }}>Zoom</Typography>
+              <Slider
+                size="small"
+                min={1}
+                max={3}
+                step={0.05}
+                value={cropZoom}
+                onChange={handleCropZoomChange}
+                valueLabelDisplay="auto"
+                disabled={!cropImageNatural || avatarUploading}
+                sx={{
+                  color: '#fff',
+                  '& .MuiSlider-valueLabel': { bgcolor: 'rgba(0,0,0,0.75)' },
+                }}
+              />
+            </Box>
+
+            <Typography
+              role="button"
+              onClick={() => void handleSaveCroppedAvatar()}
+              sx={{
+                mt: 1.5,
+                mr: 0.5,
+                textAlign: 'right',
+                color: '#fff',
+                cursor: avatarUploading ? 'default' : 'pointer',
+                textDecoration: 'underline',
+                fontWeight: 600,
+                opacity: avatarUploading ? 0.65 : 1,
+                pointerEvents: avatarUploading ? 'none' : 'auto',
+              }}
+            >
+              {avatarUploading ? 'Salvataggio...' : 'Salva foto profilo'}
+            </Typography>
+          </Box>
+        </Box>
+      )}
     </Box>
   )
 }

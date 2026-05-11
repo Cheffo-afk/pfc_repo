@@ -27,6 +27,7 @@ export type PublicUserResponse = {
   email: string;
   mustChangePassword: boolean;
   createdAt: Date;
+  unreadCount: number;
   anagraphicsRef: {
     nome: string;
     cognome: string;

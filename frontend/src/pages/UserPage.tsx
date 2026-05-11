@@ -20,6 +20,8 @@ import {
   Stack,
   Snackbar,
   TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Toolbar,
   Tooltip,
   Typography,
@@ -38,9 +40,11 @@ import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import VolumeOffRoundedIcon from '@mui/icons-material/VolumeOffRounded'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getMe, getUsers, logout, type AuthUser, type PublicUser } from '../lib/api'
+import { useMediaQuery, useTheme } from '@mui/material'
+import { getMe, getUsers, logout } from '../lib/api'
 import { useThemeMode } from '../theme/useThemeMode'
-import { useWebSocket, type PresenceStatus, type ChatMessage } from '../lib/useWebSocket'
+import { useWebSocket } from '../lib/useWebSocket'
+import type { AuthUser, PublicUser, PresenceStatus, ChatMessage } from '../types'
 import { useWebRTC } from '../lib/useWebRTC'
 
 const CALL_TIMEOUT_MS = 30_000
@@ -73,10 +77,24 @@ function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase()
 }
 
+function resolveAvatarSrc(path: string | null | undefined) {
+  if (!path || path === 'default-profile.png') {
+    return undefined
+  }
+
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path
+  }
+
+  return path.startsWith('/') ? path : `/uploads/profiles/${path}`
+}
+
 // ─── Componente ───────────────────────────────────────────────────────────────
 export default function UserPage() {
   const navigate = useNavigate()
   const { mode, toggleMode } = useThemeMode()
+  const theme = useTheme()
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
   // ─── WebSocket e WebRTC ───────────────────────────────────────────────────
   const {
@@ -89,6 +107,8 @@ export default function UserPage() {
     setOnMessage,
     setOnHistory,
     setOnSignaling,
+    setPresenceStatus,
+    disconnect,
   } = useWebSocket()
 
   const {
@@ -120,7 +140,16 @@ export default function UserPage() {
   const [messageInput, setMessageInput] = useState('')
   const [hasMoreHistory, setHasMoreHistory] = useState(false)
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [usersCollapsed, setUsersCollapsed] = useState(false)
+  const [unreadCountByUserId, setUnreadCountByUserId] = useState<Record<number, number>>({})
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
+  const historyRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Auto-collapse user list when switching to mobile, reopen on desktop
+  useEffect(() => {
+    setUsersCollapsed(isMobile)
+  }, [isMobile])
   const selectedUserRef = useRef<{ userId: number; username: string } | null>(null)
   const [timeoutMessage, setTimeoutMessage] = useState<string | null>(null)
   const refreshTimerRef = useRef<number | null>(null)
@@ -244,7 +273,13 @@ export default function UserPage() {
     async function load() {
       try {
         const list = await getUsers()
-        setUsers(list.filter(u => u.userId !== user!.userId))
+        const visibleList = list.filter(u => u.userId !== user!.userId)
+        setUsers(visibleList)
+        setUnreadCountByUserId(
+          Object.fromEntries(
+            visibleList.map((u) => [u.userId, u.unreadCount ?? 0]),
+          ),
+        )
       } catch {
         // non-critical
       }
@@ -307,11 +342,30 @@ export default function UserPage() {
   useEffect(() => {
     setOnMessage((msg) => {
       const currentSelectedUser = selectedUserRef.current
+      const currentUsername = user?.username
+      const sender = users.find((u) => u.username === msg.fromUsername)
+
+      const isIncomingForCurrentUser = Boolean(currentUsername && msg.toUsername === currentUsername)
+
+      if (sender && isIncomingForCurrentUser && sender.userId !== currentSelectedUser?.userId) {
+        setUnreadCountByUserId((prev) => ({
+          ...prev,
+          [sender.userId]: (prev[sender.userId] ?? 0) + 1,
+        }))
+      }
+
       if (!currentSelectedUser) {
         return
       }
 
-      if (msg.fromUsername !== currentSelectedUser.username && msg.toUsername !== currentSelectedUser.username) {
+      const isCurrentThreadMessage = Boolean(
+        currentUsername && (
+          (msg.fromUsername === currentSelectedUser.username && msg.toUsername === currentUsername) ||
+          (msg.toUsername === currentSelectedUser.username && msg.fromUsername === currentUsername)
+        ),
+      )
+
+      if (!isCurrentThreadMessage) {
         return
       }
 
@@ -323,16 +377,33 @@ export default function UserPage() {
         return [...prev, msg]
       })
     })
-  }, [setOnMessage])
+  }, [setOnMessage, users, user?.username])
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const container = messagesScrollRef.current
+    if (!container) {
+      return
+    }
+
+    const restore = historyRestoreRef.current
+    if (restore) {
+      const nextDelta = container.scrollHeight - restore.scrollHeight
+      container.scrollTop = restore.scrollTop + nextDelta
+      historyRestoreRef.current = null
+      return
+    }
+
+    container.scrollTop = container.scrollHeight
   }, [messages])
 
   // ─── Messaggi ─────────────────────────────────────────────────────────────
   const visibleUsers = useMemo(() => {
     return users
-      .map(u => ({ ...u, status: presences[u.username] ?? ('offline' as PresenceStatus) }))
+      .map(u => ({
+        ...u,
+        status: presences[u.username] ?? ('offline' as PresenceStatus),
+        unreadCount: unreadCountByUserId[u.userId] ?? 0,
+      }))
       .sort((a, b) => {
         const rank: Record<PresenceStatus, number> = { online: 0, nonAlComputer: 1, offline: 2 }
         const statusCompare = rank[a.status] - rank[b.status]
@@ -342,7 +413,12 @@ export default function UserPage() {
 
         return a.username.localeCompare(b.username, 'it-IT', { sensitivity: 'base' })
       })
-  }, [users, presences])
+  }, [users, presences, unreadCountByUserId])
+
+  const selectedUserData = useMemo(() => {
+    if (!selectedUser) return null
+    return users.find((u) => u.userId === selectedUser.userId) ?? null
+  }, [users, selectedUser])
 
   const selectedPresence = selectedUser ? presences[selectedUser.username] : undefined
 
@@ -391,6 +467,7 @@ export default function UserPage() {
   }, [overlayRect.height, overlayRect.width])
 
   async function handleLogout() {
+    disconnect()
     await logout()
     navigate('/login')
   }
@@ -398,17 +475,44 @@ export default function UserPage() {
   function handleSelectUser(u: { userId: number; username: string }) {
     if (selectedUser?.userId === u.userId) return
     setSelectedUser(u)
+    historyRestoreRef.current = null
+    setUnreadCountByUserId((prev) => {
+      if ((prev[u.userId] ?? 0) === 0) return prev
+      const next = { ...prev }
+      next[u.userId] = 0
+      return next
+    })
     setMessages([])
     setHasMoreHistory(false)
     setHistoryLoading(true)
     requestHistory(u.userId)
   }
 
-  function handleLoadMoreHistory() {
-    if (!selectedUser || messages.length === 0) return
+  const handleLoadMoreHistory = useCallback(() => {
+    if (!selectedUser || messages.length === 0 || historyLoading || !hasMoreHistory) return
+
+    const container = messagesScrollRef.current
+    if (container) {
+      historyRestoreRef.current = {
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+      }
+    }
+
     setHistoryLoading(true)
     requestHistory(selectedUser.userId, messages[0].messageId)
-  }
+  }, [selectedUser, messages, historyLoading, hasMoreHistory, requestHistory])
+
+  const handleMessagesScroll = useCallback(() => {
+    const container = messagesScrollRef.current
+    if (!container || historyLoading || !hasMoreHistory || !selectedUser) {
+      return
+    }
+
+    if (container.scrollTop <= 24) {
+      handleLoadMoreHistory()
+    }
+  }, [historyLoading, hasMoreHistory, selectedUser, handleLoadMoreHistory])
 
   const handleSendMessage = useCallback(() => {
     const content = messageInput.trim()
@@ -470,7 +574,43 @@ export default function UserPage() {
         </Container>
       </AppBar>
 
-      <Box sx={{ pt: { xs: 10, md: 11 } }}>
+      {/* Greeting bar */}
+      {user && (
+        <Box
+          sx={{
+            position: 'fixed',
+            top: { xs: 56, md: 64 },
+            left: 0,
+            right: 0,
+            zIndex: 1100,
+            px: 3,
+            py: 0.75,
+            bgcolor: 'background.paper',
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <Typography variant="body2" sx={{ fontWeight: 600 }}>
+            Ciao {user.username}!
+          </Typography>
+          <ToggleButtonGroup
+            value={presences[user.username] === 'nonAlComputer' ? 'nonAlComputer' : 'online'}
+            exclusive
+            size="small"
+            onChange={(_, v: 'online' | 'nonAlComputer' | null) => {
+              if (v) setPresenceStatus(v)
+            }}
+          >
+            <ToggleButton value="online" color="success">Online</ToggleButton>
+            <ToggleButton value="nonAlComputer" color="warning">Non al computer</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+      )}
+
+      <Box sx={{ pt: { xs: 14, md: 15 } }}>
         {loadError && (
           <Container maxWidth="xl" sx={{ pt: 2 }}>
             <Alert severity="error">{loadError}</Alert>
@@ -486,27 +626,43 @@ export default function UserPage() {
         {/* Two-card section */}
         <Container
           maxWidth="xl"
-          sx={{ px: { xs: 1, md: 2 }, height: { xs: 'auto', md: 'calc(100vh - 90px)' } }}
+          sx={{ px: { xs: 1, md: 2 }, height: { xs: 'auto', md: 'calc(100vh - 90px)' }, mb: '15px' }}
         >
           <Grid container spacing={2} sx={{ height: '100%' }}>
 
             {/* Left: User list */}
             <Grid size={{ xs: 12, md: 4 }}>
-              <Card sx={{ height: { xs: 380, md: '100%' }, display: 'flex', flexDirection: 'column' }}>
+              <Card sx={{ height: { xs: usersCollapsed ? 'auto' : 600, md: 600 }, display: 'flex', flexDirection: 'column' }}>
                 <Stack
                   direction="row"
                   sx={{ px: 2, py: 1.5, alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}
                 >
                   <Typography variant="h6" sx={{ fontWeight: 700 }}>Utenti</Typography>
-                  <Chip
-                    size="small"
-                    label={connected ? 'Connesso' : 'Disconnesso'}
-                    color={connected ? 'success' : 'default'}
-                    variant="outlined"
-                  />
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <Chip
+                      size="small"
+                      label={connected ? 'Connesso' : 'Disconnesso'}
+                      color={connected ? 'success' : 'default'}
+                      variant="outlined"
+                    />
+                    <IconButton
+                      size="small"
+                      onClick={() => setUsersCollapsed(v => !v)}
+                      sx={{
+                        display: { xs: 'flex', md: 'none' },
+                        width: 28, height: 28,
+                        bgcolor: 'action.selected',
+                        borderRadius: '50%',
+                        fontSize: '0.75rem',
+                        '&:hover': { bgcolor: 'action.hover' },
+                      }}
+                    >
+                      {usersCollapsed ? '▲' : '▼'}
+                    </IconButton>
+                  </Stack>
                 </Stack>
-                <Divider />
-                <List sx={{ flex: 1, overflow: 'auto', py: 0 }}>
+                <Divider sx={{ display: { xs: usersCollapsed ? 'none' : 'block', md: 'block' } }} />
+                <List sx={{ flex: 1, overflow: 'auto', py: 0, display: { xs: usersCollapsed ? 'none' : 'block', md: 'block' } }}>
                   {visibleUsers.length === 0 ? (
                     <Box sx={{ p: 3, textAlign: 'center' }}>
                       <Typography variant="body2" color="text.secondary">
@@ -535,13 +691,34 @@ export default function UserPage() {
                               />
                             }
                           >
-                            <Avatar sx={{ bgcolor: 'primary.main', fontWeight: 700 }}>
+                            <Avatar
+                              src={resolveAvatarSrc(u.anagraphicsRef?.fotoProfilo)}
+                              sx={{ bgcolor: 'primary.main', fontWeight: 700 }}
+                            >
                               {getInitials(u.username)}
                             </Avatar>
                           </Badge>
                         </ListItemAvatar>
                         <ListItemText
-                          primary={<Typography sx={{ fontWeight: selectedUser?.userId === u.userId ? 700 : 400 }}>{u.username}</Typography>}
+                          primary={(
+                            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap' }}>
+                              <Typography sx={{ fontWeight: selectedUser?.userId === u.userId ? 700 : 400 }}>
+                                {u.username}
+                              </Typography>
+                              {(u.unreadCount ?? 0) > 0 && (
+                                <Chip
+                                  size="small"
+                                  label={u.unreadCount === 1 ? '1 non letto' : `${u.unreadCount} non letti`}
+                                  sx={{
+                                    bgcolor: '#1976d2',
+                                    color: '#fff',
+                                    fontWeight: 600,
+                                    '& .MuiChip-label': { px: 1 },
+                                  }}
+                                />
+                              )}
+                            </Stack>
+                          )}
                           secondary={statusLabel(u.status)}
                         />
                       </ListItemButton>
@@ -553,7 +730,7 @@ export default function UserPage() {
 
             {/* Right: Chat + Video */}
             <Grid size={{ xs: 12, md: 8 }}>
-              <Card sx={{ height: { xs: 540, md: '100%' }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <Card sx={{ height: 600, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {!selectedUser ? (
                   <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 4 }}>
                     <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
@@ -583,7 +760,10 @@ export default function UserPage() {
                             <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: statusDotColor(selectedPresence), border: '2px solid', borderColor: 'background.paper' }} />
                           }
                         >
-                          <Avatar sx={{ bgcolor: 'primary.main', width: 36, height: 36, fontWeight: 700 }}>
+                          <Avatar
+                            src={resolveAvatarSrc(selectedUserData?.anagraphicsRef?.fotoProfilo)}
+                            sx={{ bgcolor: 'primary.main', width: 36, height: 36, fontWeight: 700 }}
+                          >
                             {getInitials(selectedUser.username)}
                           </Avatar>
                         </Badge>
@@ -606,17 +786,22 @@ export default function UserPage() {
                     </Stack>
 
                     {/* Messages */}
-                    <Box sx={{ flex: 1, overflow: 'auto', p: 2, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                      {hasMoreHistory && (
+                    <Box
+                      ref={messagesScrollRef}
+                      onScroll={handleMessagesScroll}
+                      sx={{
+                        flex: 1,
+                        minHeight: 0,
+                        overflow: 'auto',
+                        p: 2,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 1,
+                      }}
+                    >
+                      {historyLoading && hasMoreHistory && (
                         <Box sx={{ textAlign: 'center', mb: 1 }}>
-                          <Button
-                            size="small" variant="text"
-                            onClick={handleLoadMoreHistory}
-                            disabled={historyLoading}
-                            startIcon={historyLoading ? <CircularProgress size={14} /> : undefined}
-                          >
-                            {historyLoading ? 'Caricamento...' : 'Carica messaggi precedenti'}
-                          </Button>
+                          <CircularProgress size={18} />
                         </Box>
                       )}
                       {messages.length === 0 && !historyLoading && (

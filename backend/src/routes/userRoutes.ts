@@ -14,7 +14,7 @@ import { UpdateOwnProfileSchema } from "../validation/schemas";
 import type {
   ApiMessageResponse,
   ProfilePictureUploadResponse,
-} from "../types/responses";
+} from "../types";
 
 const userRoutes = Router();
 
@@ -58,7 +58,8 @@ userRoutes.post("/users", (req, res) => {
 // ______ GET /users — lista utenti attivi (usata dalla chat per il pannello utenti) ______
 userRoutes.get("/users", (req, res) => {
   void (async () => {
-    const users = await listActiveUsers();
+    const currentUserId = req.session.authUser?.userId;
+    const users = await listActiveUsers(currentUserId);
 
     res.status(200).json(users);
   })();

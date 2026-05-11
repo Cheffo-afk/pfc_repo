@@ -1,7 +1,8 @@
 import { Alert, Box, CircularProgress, Container } from '@mui/material'
 import { useEffect, useState, type PropsWithChildren } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import { getMe, type AuthUser } from './api'
+import { getMe } from './api'
+import type { AuthUser } from '../types'
 
 // RouteGuard verifica la sessione ad ogni cambio di pathname.
 // Se la sessione non è valida → redirect /login.

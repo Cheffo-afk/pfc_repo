@@ -1,5 +1,6 @@
 import {
   Alert,
+  AppBar,
   Box,
   Button,
   Card,
@@ -11,6 +12,7 @@ import {
   DialogContent,
   DialogTitle,
   Grid,
+  IconButton,
   List,
   ListItemButton,
   ListItemText,
@@ -19,17 +21,24 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
+  Toolbar,
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
+import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
+import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import {
   activateUser,
   getAdminUsers,
   getMe,
+  logout,
   toggleAdminUserSubscription,
-  type AdminUser,
 } from '../lib/api'
+import { useThemeMode } from '../theme/useThemeMode'
+import { disconnectWebSocket, useWebSocket } from '../lib/useWebSocket'
+import type { AdminUser } from '../types'
 
 type SortMode = 'status' | 'userId'
 type SortDirection = 'asc' | 'desc'
@@ -56,10 +65,12 @@ function getStatusChipColor(status: 'online' | 'offline' | 'nonAlComputer') {
 
 export default function AdminPage() {
   const navigate = useNavigate()
+  const { mode, toggleMode } = useThemeMode()
+  const { presences } = useWebSocket()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [sortMode, setSortMode] = useState<SortMode>('status')
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc')
+  const [sortDirection] = useState<SortDirection>('asc')
   const [subscriptionFilter, setSubscriptionFilter] = useState<SubscriptionFilter>('all')
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
@@ -70,6 +81,12 @@ export default function AdminPage() {
   const [adminPassword, setAdminPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [activatingId, setActivatingId] = useState<number | null>(null)
+
+  async function handleLogout() {
+    disconnectWebSocket()
+    await logout()
+    navigate('/login')
+  }
 
   useEffect(() => {
     let mounted = true
@@ -108,10 +125,28 @@ export default function AdminPage() {
     }
   }, [])
 
+  // ─── Merge presence realtime sui dati admin ───────────────────────────────
+  // Mantiene i dati principali da API, sovrascrivendo solo lo stato live ricevuto via WS.
+  const usersWithPresence = useMemo(() => {
+    return users.map((user) => {
+      const liveStatus = presences[user.username]
+      if (!liveStatus) {
+        return user
+      }
+
+      return {
+        ...user,
+        userStateRef: user.userStateRef
+          ? { ...user.userStateRef, status: liveStatus }
+          : { status: liveStatus, lastOnline: new Date().toISOString() },
+      }
+    })
+  }, [users, presences])
+
   const filteredAndSortedUsers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase()
 
-    const filtered = users.filter((u) => {
+    const filtered = usersWithPresence.filter((u) => {
       // Filter by subscription status
       if (subscriptionFilter !== 'all' && u.subscribed !== subscriptionFilter) {
         return false
@@ -139,29 +174,29 @@ export default function AdminPage() {
     })
 
     return sorted
-  }, [users, query, sortMode, sortDirection, subscriptionFilter])
+  }, [usersWithPresence, query, sortMode, sortDirection, subscriptionFilter])
 
   const selectedUser = useMemo(
-    () => users.find((u) => u.userId === selectedUserId) ?? null,
-    [users, selectedUserId],
+    () => usersWithPresence.find((u) => u.userId === selectedUserId) ?? null,
+    [usersWithPresence, selectedUserId],
   )
 
   const summary = useMemo(() => {
-    const online = users.filter((u) => u.userStateRef?.status === 'online').length
-    const away = users.filter((u) => u.userStateRef?.status === 'nonAlComputer').length
-    const offline = users.filter((u) => (u.userStateRef?.status ?? 'offline') === 'offline').length
-    const active = users.filter((u) => u.subscribed === 'active').length
-    const inactive = users.filter((u) => u.subscribed === 'inactive').length
+    const online = usersWithPresence.filter((u) => u.userStateRef?.status === 'online').length
+    const away = usersWithPresence.filter((u) => u.userStateRef?.status === 'nonAlComputer').length
+    const offline = usersWithPresence.filter((u) => (u.userStateRef?.status ?? 'offline') === 'offline').length
+    const active = usersWithPresence.filter((u) => u.subscribed === 'active').length
+    const inactive = usersWithPresence.filter((u) => u.subscribed === 'inactive').length
 
     return {
-      total: users.length,
+      total: usersWithPresence.length,
       online,
       away,
       offline,
       active,
       inactive,
     }
-  }, [users])
+  }, [usersWithPresence])
 
   async function handleConfirmToggle() {
     if (!selectedUser || !adminPassword) {
@@ -220,8 +255,58 @@ export default function AdminPage() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, pt: { xs: 10.25, md: 12.25 } }}>
-      <Container maxWidth="lg">
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+      <AppBar
+        position="fixed"
+        color="transparent"
+        elevation={0}
+        sx={{ backdropFilter: 'blur(10px)', borderBottom: '1px solid', borderColor: 'divider' }}
+      >
+        <Container maxWidth="xl">
+          <Toolbar disableGutters sx={{ justifyContent: 'space-between', py: 0.8 }}>
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+              <Typography
+                variant="h6"
+                onClick={() => navigate('/')}
+                sx={{ fontWeight: 800, cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.7 } }}
+              >
+                PFCWB-Chat
+              </Typography>
+              <Typography
+                variant="body2"
+                onClick={() => navigate('/admin/gestione-iscritti')}
+                sx={{
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  color: 'text.primary',
+                  textAlign: 'left',
+                  transition: 'opacity 0.2s',
+                  '&:hover': { opacity: 0.7 },
+                }}
+              >
+                Gestione Iscritti
+              </Typography>
+            </Stack>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <IconButton onClick={toggleMode} size="small" color="inherit">
+                {mode === 'light' ? <DarkModeRoundedIcon /> : <LightModeRoundedIcon />}
+              </IconButton>
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<LogoutRoundedIcon />}
+                onClick={() => void handleLogout()}
+              >
+                Esci
+              </Button>
+            </Stack>
+          </Toolbar>
+        </Container>
+      </AppBar>
+
+      <Box sx={{ pt: { xs: 3.5, md: 3.5 } }}>
+        <Container maxWidth="lg" sx={{ py: { xs: 4, md: 8 }, mb: '10px' }}>
         <Stack spacing={2.5}>
           <Card>
             <CardContent>
@@ -269,18 +354,6 @@ export default function AdminPage() {
                   >
                     <MenuItem value="status">Stato (online/offline/non al computer)</MenuItem>
                     <MenuItem value="userId">userId</MenuItem>
-                  </TextField>
-                  <TextField
-                    select
-                    size="small"
-                    label="Direzione"
-                    value={sortDirection}
-                    disabled={sortMode !== 'userId'}
-                    onChange={(e) => setSortDirection(e.target.value as SortDirection)}
-                    sx={{ minWidth: { xs: '100%', md: 180 } }}
-                  >
-                    <MenuItem value="asc">Ascendente</MenuItem>
-                    <MenuItem value="desc">Discendente</MenuItem>
                   </TextField>
                 </Stack>
               </Stack>
@@ -428,7 +501,8 @@ export default function AdminPage() {
             </Grid>
           </Grid>
         </Stack>
-      </Container>
+        </Container>
+      </Box>
 
       <Dialog open={confirmOpen} onClose={() => (submitting ? undefined : setConfirmOpen(false))} fullWidth>
         <DialogTitle>Conferma operazione amministrativa</DialogTitle>

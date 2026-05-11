@@ -70,6 +70,69 @@ export async function persistDirectMessage(
   return saved;
 }
 
+// ______ Conta i messaggi non letti in una direct conversation ______
+export async function countUnreadDirectMessages(
+  readerUserId: number,
+  otherUserId: number,
+): Promise<number> {
+  const room = await prisma.chatRoom.findFirst({
+    where: {
+      roomType: "direct",
+      AND: [
+        { participants: { some: { userId: readerUserId } } },
+        { participants: { some: { userId: otherUserId } } },
+      ],
+    },
+    select: { roomId: true },
+  });
+
+  if (!room) {
+    return 0;
+  }
+
+  return prisma.roomMessage.count({
+    where: {
+      roomId: room.roomId,
+      senderId: otherUserId,
+      readAt: null,
+    },
+  });
+}
+
+// ______ Segna come letti i messaggi dell'altro utente nella direct conversation ______
+export async function markDirectMessagesAsRead(
+  readerUserId: number,
+  otherUserId: number,
+): Promise<number> {
+  const room = await prisma.chatRoom.findFirst({
+    where: {
+      roomType: "direct",
+      AND: [
+        { participants: { some: { userId: readerUserId } } },
+        { participants: { some: { userId: otherUserId } } },
+      ],
+    },
+    select: { roomId: true },
+  });
+
+  if (!room) {
+    return 0;
+  }
+
+  const result = await prisma.roomMessage.updateMany({
+    where: {
+      roomId: room.roomId,
+      senderId: otherUserId,
+      readAt: null,
+    },
+    data: {
+      readAt: new Date(),
+    },
+  });
+
+  return result.count;
+}
+
 // ______ Ritorna fino a 30 messaggi, ordinati dal piu' vecchio al piu' recente ______
 export async function getDirectHistoryPage(
   userAId: number,

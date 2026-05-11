@@ -16,6 +16,8 @@ export const ChangePasswordSchema = z.object({
 
 // ______ POST /admin/users ______
 export const AdminCreateUserSchema = z.object({
+  nome: z.string().min(1, "Nome obbligatorio"),
+  cognome: z.string().min(1, "Cognome obbligatorio"),
   email: z.string().email("Email non valida"),
   username: z.string().min(1, "Username obbligatorio"),
   initialPassword: z.string().min(8, "La password iniziale deve avere almeno 8 caratteri"),

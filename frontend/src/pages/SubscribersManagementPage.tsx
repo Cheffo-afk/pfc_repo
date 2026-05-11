@@ -1,5 +1,6 @@
 import {
   Alert,
+  AppBar,
   Box,
   Button,
   Card,
@@ -11,22 +12,36 @@ import {
   DialogContent,
   DialogTitle,
   Grid,
+  IconButton,
+  InputAdornment,
   List,
   ListItemButton,
   ListItemText,
   Stack,
   TextField,
+  Toolbar,
   Typography,
 } from '@mui/material'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
+import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
+import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
+import VisibilityIcon from '@mui/icons-material/Visibility'
+import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import {
+  createAdminUser,
   getAdminUsers,
   getMe,
+  logout,
   setInitialPassword,
   toggleAdminUserSubscription,
-  type AdminUser,
 } from '../lib/api'
+import { disconnectWebSocket } from '../lib/useWebSocket'
+import { useThemeMode } from '../theme/useThemeMode'
+import type { AdminUser } from '../types'
+
+const CREATE_SUCCESS_CLOSE_DELAY_MS = 1200
 
 function toSubscriptionLabel(subscribed: AdminUser['subscribed']) {
   return subscribed === 'active' ? 'subscribed' : 'unsubscribed'
@@ -34,6 +49,7 @@ function toSubscriptionLabel(subscribed: AdminUser['subscribed']) {
 
 export default function SubscribersManagementPage() {
   const navigate = useNavigate()
+  const { mode, toggleMode } = useThemeMode()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
@@ -43,11 +59,47 @@ export default function SubscribersManagementPage() {
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [adminPassword, setAdminPassword] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [createSubmitting, setCreateSubmitting] = useState(false)
+  const [createFeedback, setCreateFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
+  const [showCreatePassword, setShowCreatePassword] = useState(false)
+  const [showTemporaryPassword, setShowTemporaryPassword] = useState(false)
+  const [createForm, setCreateForm] = useState({
+    nome: '',
+    cognome: '',
+    username: '',
+    email: '',
+    initialPassword: '',
+  })
 
   const [temporaryPassword, setTemporaryPassword] = useState('')
   const [settingPassword, setSettingPassword] = useState(false)
   const temporaryPasswordTrimmed = temporaryPassword.trim()
   const isTemporaryPasswordValid = temporaryPasswordTrimmed.length >= 8
+
+  const isCreateFormValid =
+    createForm.nome.trim().length > 0 &&
+    createForm.cognome.trim().length > 0 &&
+    createForm.username.trim().length > 0 &&
+    createForm.email.trim().length > 0 &&
+    createForm.initialPassword.trim().length >= 8
+
+  async function handleLogout() {
+    disconnectWebSocket()
+    await logout()
+    navigate('/login')
+  }
+
+  function resetCreateForm() {
+    setCreateForm({
+      nome: '',
+      cognome: '',
+      username: '',
+      email: '',
+      initialPassword: '',
+    })
+    setCreateFeedback(null)
+  }
 
   useEffect(() => {
     let mounted = true
@@ -157,6 +209,58 @@ export default function SubscribersManagementPage() {
     }
   }
 
+  async function handleCreateUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!isCreateFormValid) {
+      setCreateFeedback({
+        type: 'error',
+        text: 'Compila tutti i campi. La password iniziale deve avere almeno 8 caratteri.',
+      })
+      return
+    }
+
+    try {
+      setCreateSubmitting(true)
+      setCreateFeedback(null)
+
+      const created = await createAdminUser({
+        nome: createForm.nome.trim(),
+        cognome: createForm.cognome.trim(),
+        username: createForm.username.trim(),
+        email: createForm.email.trim(),
+        initialPassword: createForm.initialPassword,
+      })
+
+      const list = await getAdminUsers()
+      setUsers(list)
+      setSelectedUserId(created.userId)
+      setFeedback(`Utente ${created.username} creato correttamente`)
+      setCreateForm({
+        nome: '',
+        cognome: '',
+        username: '',
+        email: '',
+        initialPassword: '',
+      })
+      setCreateFeedback({
+        type: 'success',
+        text: `Utente ${created.username} creato correttamente. Chiusura finestra in corso...`,
+      })
+      window.setTimeout(() => {
+        setCreateOpen(false)
+        resetCreateForm()
+      }, CREATE_SUCCESS_CLOSE_DELAY_MS)
+    } catch (error) {
+      setCreateFeedback({
+        type: 'error',
+        text: error instanceof Error ? error.message : 'Creazione utente non riuscita',
+      })
+    } finally {
+      setCreateSubmitting(false)
+    }
+  }
+
   if (loading) {
     return (
       <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, pt: { xs: 10.25, md: 12.25 } }}>
@@ -183,8 +287,58 @@ export default function SubscribersManagementPage() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', py: { xs: 4, md: 8 }, pt: { xs: 10.25, md: 12.25 } }}>
-      <Container maxWidth="lg">
+    <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
+      <AppBar
+        position="fixed"
+        color="transparent"
+        elevation={0}
+        sx={{ backdropFilter: 'blur(10px)', borderBottom: '1px solid', borderColor: 'divider' }}
+      >
+        <Container maxWidth="xl">
+          <Toolbar disableGutters sx={{ justifyContent: 'space-between', py: 0.8 }}>
+            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
+              <Typography
+                variant="h6"
+                onClick={() => navigate('/')}
+                sx={{ fontWeight: 800, cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.7 } }}
+              >
+                PFCWB-Chat
+              </Typography>
+              <Typography
+                variant="body2"
+                onClick={() => navigate('/admin')}
+                sx={{
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  color: 'text.primary',
+                  textAlign: 'left',
+                  transition: 'opacity 0.2s',
+                  '&:hover': { opacity: 0.7 },
+                }}
+              >
+                Admin
+              </Typography>
+            </Stack>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <IconButton onClick={toggleMode} size="small" color="inherit">
+                {mode === 'light' ? <DarkModeRoundedIcon /> : <LightModeRoundedIcon />}
+              </IconButton>
+              <Button
+                variant="outlined"
+                color="error"
+                size="small"
+                startIcon={<LogoutRoundedIcon />}
+                onClick={() => void handleLogout()}
+              >
+                Esci
+              </Button>
+            </Stack>
+          </Toolbar>
+        </Container>
+      </AppBar>
+
+      <Box sx={{ pt: { xs: 3.5, md: 3.5 } }}>
+      <Container maxWidth="lg" sx={{ py: { xs: 4, md: 8 }, mb: '10px' }}>
         <Stack spacing={2.5}>
           <Card>
             <CardContent>
@@ -196,6 +350,17 @@ export default function SubscribersManagementPage() {
                   Quando un utente si iscrive, compare qui con stato unsubscribed. L'amministratore imposta
                   la password temporanea e la comunica separatamente.
                 </Typography>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  sx={{ alignSelf: 'flex-start' }}
+                  onClick={() => {
+                    resetCreateForm()
+                    setCreateOpen(true)
+                  }}
+                >
+                  + aggiungi nuovo utente
+                </Button>
                 {pendingRequests > 0 && (
                   <Alert severity="warning">
                     Nuove richieste iscrizione: {pendingRequests}
@@ -281,7 +446,7 @@ export default function SubscribersManagementPage() {
                                 Imposta prima password
                               </Typography>
                               <TextField
-                                type="password"
+                                type={showTemporaryPassword ? 'text' : 'password'}
                                 placeholder="inserire password temporanea"
                                 value={temporaryPassword}
                                 onChange={(e) => setTemporaryPassword(e.target.value)}
@@ -292,6 +457,21 @@ export default function SubscribersManagementPage() {
                                     : 'Inserisci una password temporanea da comunicare all\'utente'
                                 }
                                 fullWidth
+                                slotProps={{
+                                  input: {
+                                    endAdornment: (
+                                      <InputAdornment position="end">
+                                        <IconButton
+                                          onClick={() => setShowTemporaryPassword((prev) => !prev)}
+                                          edge="end"
+                                          size="small"
+                                        >
+                                          {showTemporaryPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                                        </IconButton>
+                                      </InputAdornment>
+                                    ),
+                                  },
+                                }}
                               />
                               <Button
                                 variant="contained"
@@ -314,7 +494,7 @@ export default function SubscribersManagementPage() {
                             setConfirmOpen(true)
                           }}
                         >
-                          {selectedUser.subscribed === 'active' ? 'Imposta unsubscribed' : 'Imposta subscribed'}
+                          {selectedUser.subscribed === 'active' ? 'Imposta Inattivo' : 'Imposta Attivo'}
                         </Button>
                       </Stack>
                     </Stack>
@@ -325,6 +505,7 @@ export default function SubscribersManagementPage() {
           </Grid>
         </Stack>
       </Container>
+      </Box>
 
       <Dialog open={confirmOpen} onClose={() => (submitting ? undefined : setConfirmOpen(false))} fullWidth>
         <DialogTitle>Conferma modifica stato</DialogTitle>
@@ -357,6 +538,92 @@ export default function SubscribersManagementPage() {
             Conferma
           </Button>
         </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={createOpen}
+        onClose={() => (createSubmitting ? undefined : setCreateOpen(false))}
+        fullWidth
+        maxWidth="sm"
+      >
+        <DialogTitle>Aggiungi nuovo utente</DialogTitle>
+        <Box component="form" onSubmit={handleCreateUser}>
+          <DialogContent>
+            <Stack spacing={1.5}>
+              <Typography color="text.secondary">
+                Compila lo stesso form della registrazione pubblica e imposta subito la prima password.
+              </Typography>
+              <TextField
+                label="Nome"
+                required
+                fullWidth
+                value={createForm.nome}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, nome: e.target.value }))}
+              />
+              <TextField
+                label="Cognome"
+                required
+                fullWidth
+                value={createForm.cognome}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, cognome: e.target.value }))}
+              />
+              <TextField
+                label="Username"
+                required
+                fullWidth
+                value={createForm.username}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, username: e.target.value }))}
+              />
+              <TextField
+                label="Email"
+                type="email"
+                required
+                fullWidth
+                value={createForm.email}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, email: e.target.value }))}
+              />
+              <TextField
+                label="Prima password"
+                type={showCreatePassword ? 'text' : 'password'}
+                required
+                fullWidth
+                value={createForm.initialPassword}
+                onChange={(e) => setCreateForm((prev) => ({ ...prev, initialPassword: e.target.value }))}
+                helperText="Minimo 8 caratteri. L'utente dovra cambiarla al primo accesso."
+                slotProps={{
+                  input: {
+                    endAdornment: (
+                      <InputAdornment position="end">
+                        <IconButton
+                          onClick={() => setShowCreatePassword((prev) => !prev)}
+                          edge="end"
+                          size="small"
+                        >
+                          {showCreatePassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                        </IconButton>
+                      </InputAdornment>
+                    ),
+                  },
+                }}
+              />
+              {createFeedback && <Alert severity={createFeedback.type}>{createFeedback.text}</Alert>}
+            </Stack>
+          </DialogContent>
+          <DialogActions>
+            <Button
+              onClick={() => {
+                setCreateOpen(false)
+                resetCreateForm()
+              }}
+              disabled={createSubmitting}
+            >
+              Annulla
+            </Button>
+            <Button type="submit" variant="contained" disabled={!isCreateFormValid || createSubmitting}>
+              {createSubmitting ? 'Creazione...' : 'Crea utente'}
+            </Button>
+          </DialogActions>
+        </Box>
       </Dialog>
     </Box>
   )
