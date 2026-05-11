@@ -1,7 +1,5 @@
 import {
   Alert,
-  AppBar,
-  Avatar,
   Box,
   Button,
   Card,
@@ -9,43 +7,36 @@ import {
   Chip,
   Container,
   Divider,
-  IconButton,
   Slider,
   Stack,
   TextField,
-  Toolbar,
-  Tooltip,
   Typography,
 } from '@mui/material'
-import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
-import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
-import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import LockRoundedIcon from '@mui/icons-material/LockRounded'
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { changePassword, getMe, logout, updateMyProfile, uploadProfilePicture } from '../lib/api'
+import { PageAppBar, UserAvatar } from '../components'
 import { disconnectWebSocket } from '../lib/useWebSocket'
 import { useThemeMode } from '../theme/useThemeMode'
 import type { AuthUser } from '../types'
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function getInitials(name: string) {
-  return name.slice(0, 2).toUpperCase()
-}
+// ─── Costanti ────────────────────────────────────────────────────────────────
+// ______ Dimensioni del cropper avatar: stage, foro circolare, esportazione finale ______
 
 const AVATAR_CROP_STAGE_SIZE = 360
 const AVATAR_CROP_HOLE_SIZE = 220
 const AVATAR_EXPORT_SIZE = 512
 
 // Chiave localStorage per la descrizione utente: isolata per userId
-// per evitare collisioni tra utenti diversi sullo stesso browser.
+// ______ per evitare collisioni tra utenti diversi sullo stesso browser ______
 function descriptionStorageKey(userId: number) {
   return `pfcwd.profile.description.${userId}`
 }
 
 // ─── Componente ───────────────────────────────────────────────────────────────
-// Pagina dedicata alla gestione del profilo: anagrafica, foto, cambio password.
-// Accessibile solo ad utenti autenticati via RouteGuard (/user/profile).
+// ______ Pagina dedicata alla gestione del profilo: anagrafica, foto, cambio password ______
+// ______ Accessibile solo ad utenti autenticati via RouteGuard (/user/profile) ______
 export default function UserProfilePage() {
   const navigate = useNavigate()
   const { mode, toggleMode } = useThemeMode()
@@ -188,20 +179,7 @@ export default function UserProfilePage() {
     }
   }
 
-  // Risolve il path foto profilo in un URL completo.
-  // 'default-profile.png' → undefined (usa le iniziali dell'Avatar MUI).
-  function resolveAvatarSrc(path: string | null | undefined) {
-    if (!path || path === 'default-profile.png') {
-      return undefined
-    }
-
-    if (path.startsWith('http://') || path.startsWith('https://')) {
-      return path
-    }
-
-    return path.startsWith('/') ? path : `/uploads/profiles/${path}`
-  }
-
+  // ______ Clamp del crop offset per mantenere il foro circolare sempre dentro l'immagine ______
   function clampCropOffset(x: number, y: number, natural: { width: number; height: number }, scale: number) {
     const scaledWidth = natural.width * scale
     const scaledHeight = natural.height * scale
@@ -446,56 +424,14 @@ export default function UserProfilePage() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default', mb: '10px' }}>
-      <AppBar
-        position="fixed"
-        color="transparent"
-        elevation={0}
-        sx={{ backdropFilter: 'blur(10px)', borderBottom: '1px solid', borderColor: 'divider' }}
-      >
-        <Container maxWidth="xl">
-          <Toolbar disableGutters sx={{ justifyContent: 'space-between', py: 0.8 }}>
-            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-              <Typography
-                variant="h6"
-                onClick={() => navigate('/')}
-                sx={{ fontWeight: 800, cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.7 } }}
-              >
-                PFCWB-Chat
-              </Typography>
-              <Typography
-                variant="body2"
-                onClick={() => navigate('/user')}
-                sx={{
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  color: 'text.primary',
-                  textAlign: 'left',
-                  transition: 'opacity 0.2s',
-                  '&:hover': { opacity: 0.7 },
-                }}
-              >
-                Chat
-              </Typography>
-            </Stack>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Tooltip title={mode === 'light' ? 'Modalità scura' : 'Modalità chiara'}>
-                <IconButton onClick={toggleMode} size="small" color="inherit">
-                  {mode === 'light' ? <DarkModeRoundedIcon /> : <LightModeRoundedIcon />}
-                </IconButton>
-              </Tooltip>
-              <Button
-                variant="outlined"
-                color="error"
-                size="small"
-                startIcon={<LogoutRoundedIcon />}
-                onClick={() => void handleLogout()}
-              >
-                Esci
-              </Button>
-            </Stack>
-          </Toolbar>
-        </Container>
-      </AppBar>
+      <PageAppBar
+        title="PFCWB-Chat"
+        onTitleClick={() => navigate('/')}
+        links={[{ label: 'Chat', onClick: () => navigate('/user') }]}
+        mode={mode}
+        onToggleMode={toggleMode}
+        onLogout={() => void handleLogout()}
+      />
 
       <Container maxWidth="md" sx={{ pt: { xs: 11, md: 12 }, pb: 4 }}>
         <Stack spacing={3}>
@@ -512,13 +448,7 @@ export default function UserProfilePage() {
                   <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 2 }}>
                     <Stack direction="row" spacing={2.5} sx={{ alignItems: 'center' }}>
                       <Box sx={{ position: 'relative', width: 72, height: 72 }}>
-                        <Avatar
-                          src={resolveAvatarSrc(user.anagraphicsRef?.fotoProfilo)}
-                          sx={{ width: 72, height: 72, fontSize: '1.5rem', fontWeight: 700, bgcolor: 'primary.main', color: 'primary.contrastText' }}
-                          slotProps={{ img: { style: { objectFit: 'cover', objectPosition: 'center center' } } }}
-                        >
-                          {getInitials(user.username)}
-                        </Avatar>
+                        <UserAvatar username={user.username} photoPath={user.anagraphicsRef?.fotoProfilo} size={72} />
                         <Button
                           size="small"
                           variant="contained"

@@ -17,14 +17,18 @@ import { useThemeMode } from './theme/useThemeMode'
 import { getAdminUsers, getMe } from './lib/api'
 import { RouteGuard } from './lib/RouteGuard'
 
+// ─── Lazy pages ───────────────────────────────────────────────────────────────
+// ______ Tutte le pagine sono caricate in lazy per ridurre il bundle iniziale ______
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const RegisterPage = lazy(() => import('./pages/RegisterPage'))
 const AdminPage = lazy(() => import('./pages/AdminPage'))
 const SubscribersManagementPage = lazy(() => import('./pages/SubscribersManagementPage'))
+const RequestsPage = lazy(() => import('./pages/RequestsPage'))
 const UserPage = lazy(() => import('./pages/UserPage'))
 const UserProfilePage = lazy(() => import('./pages/UserProfilePage'))
 
+// ______ Spinner mostrato durante il lazy-load di ogni pagina ______
 function PageLoader() {
   return (
     <Box
@@ -46,8 +50,8 @@ function PageLoader() {
 }
 
 // ─── Stato navbar e ruolo ─────────────────────────────────────────────────────
-// La navbar globale è visibile solo sulle pagine pubbliche, scorrendo verso l'alto.
-// Le pagine /user e /user/profile usano una propria AppBar e non mostrano questa.
+// ______ La navbar globale e' visibile solo sulle pagine pubbliche, appare quando il cursore ______
+// ______ e' nella zona alta (entro 100px) — /user e /admin usano le proprie AppBar ______
 function App() {
   const navigate = useNavigate()
   const location = useLocation()
@@ -56,7 +60,7 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [pendingRegistrations, setPendingRegistrations] = useState(0)
 
-  // Mostra/nasconde la navbar quando il cursore è nella zona alta (entro 100px).
+  // ______ Mostra/nasconde la navbar quando il cursore e' nella zona alta (entro 100px) ______
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       setShowNavbar(e.clientY < 100)
@@ -66,8 +70,8 @@ function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove)
   }, [])
 
-  // Risolve il ruolo corrente ad ogni cambio di pathname per decidere
-  // se mostrare i pulsanti admin nella navbar.
+  // ______ Risolve il ruolo corrente ad ogni cambio di pathname ______
+  // ______ per mostrare i link admin nella navbar solo quando l'utente e' admin ______
   useEffect(() => {
     let mounted = true
 
@@ -98,7 +102,8 @@ function App() {
 
   const isPublicPath = ['/', '/login', '/register'].includes(location.pathname)
 
-  // Polling ogni 15 secondi per aggiornare il contatore iscritti in attesa.
+  // ______ Polling ogni 15 secondi per aggiornare il badge con le iscrizioni in attesa ______
+  // ______ Attivo solo quando l'utente e' admin ______
   useEffect(() => {
     if (!isAdmin) {
       return
@@ -213,6 +218,14 @@ function App() {
               element={(
                 <RouteGuard requiredRole="admin">
                   <SubscribersManagementPage />
+                </RouteGuard>
+              )}
+            />
+            <Route
+              path="/admin/richieste"
+              element={(
+                <RouteGuard requiredRole="admin">
+                  <RequestsPage />
                 </RouteGuard>
               )}
             />

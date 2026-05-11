@@ -1,80 +1,42 @@
 import {
   Alert,
   Box,
-  Button,
   Card,
-  CircularProgress,
   Container,
-  Grid,
   IconButton,
+  Grid,
   Stack,
-  Snackbar,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-  Tooltip,
   Typography,
 } from '@mui/material'
 import SendRoundedIcon from '@mui/icons-material/SendRounded'
-import VideocamRoundedIcon from '@mui/icons-material/VideocamRounded'
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useMediaQuery, useTheme } from '@mui/material'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { getMe, getUsers, logout } from '../lib/api'
-import { CallOverlay, ChatUserListCard, PageAppBar, UserAvatar } from '../components'
+import { ChatUserListCard, PageAppBar, UserAvatar } from '../components'
 import { useThemeMode } from '../theme/useThemeMode'
 import { useWebSocket } from '../lib/useWebSocket'
 import { statusLabel, formatTime } from '../lib/presenceUtils'
 import type { AuthUser, PublicUser, PresenceStatus, ChatMessage } from '../types'
-import { useWebRTC } from '../lib/useWebRTC'
 
-const CALL_TIMEOUT_MS = 30_000
-const CALL_RECOVERY_REFRESH_DELAY_MS = 1_500
-const OVERLAY_MIN_WIDTH = 340
-const OVERLAY_MIN_HEIGHT = 260
+// ─── Componente ──────────────────────────────────────────────────────────────────
 
-// ─── Componente ───────────────────────────────────────────────────────────────
-export default function UserPage() {
+export default function RequestsPage() {
   const navigate = useNavigate()
   const { mode, toggleMode } = useThemeMode()
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
 
-  // ─── WebSocket e WebRTC ───────────────────────────────────────────────────
   const {
     connected,
     wsError,
     presences,
     sendChatMessage,
     requestHistory,
-    sendSignaling,
     setOnMessage,
     setOnHistory,
-    setOnSignaling,
-    setPresenceStatus,
-    disconnect,
   } = useWebSocket()
-
-  const {
-    callState,
-    incomingCall,
-    activeCallTargetUserId,
-    localVideoRef,
-    remoteVideoRef,
-    isMicEnabled,
-    isCameraEnabled,
-    remoteVolume,
-    startCall,
-    acceptCall,
-    rejectCall,
-    hangup,
-    toggleMic,
-    toggleCamera,
-    setCallVolume,
-    toggleFullscreen,
-    reconnectCall,
-    handleSignaling,
-  } = useWebRTC(sendSignaling)
 
   const [user, setUser] = useState<AuthUser | null>(null)
   const [users, setUsers] = useState<PublicUser[]>([])
@@ -87,114 +49,19 @@ export default function UserPage() {
   const [historyLoading, setHistoryLoading] = useState(false)
   const [usersCollapsed, setUsersCollapsed] = useState(false)
   const [unreadCountByUserId, setUnreadCountByUserId] = useState<Record<number, number>>({})
+
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const historyRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const selectedUserRef = useRef<{ userId: number; username: string } | null>(null)
 
-  // Auto-collapse user list when switching to mobile, reopen on desktop
   useEffect(() => {
     setUsersCollapsed(isMobile)
   }, [isMobile])
-  const selectedUserRef = useRef<{ userId: number; username: string } | null>(null)
-  const [timeoutMessage, setTimeoutMessage] = useState<string | null>(null)
-  const refreshTimerRef = useRef<number | null>(null)
-  // ─── Overlay videochiamata ────────────────────────────────────────────────
-  // Posizione e dimensioni iniziali calcolate dal viewport per posizionare
-  // l'overlay in basso a destra. Rimane nei limiti del viewport via clampOverlayRect.
-  const [overlayRect, setOverlayRect] = useState(() => {
-    if (typeof window === 'undefined') {
-      return { x: 24, y: 24, width: 460, height: 340 }
-    }
 
-    const width = 460
-    const height = 340
-    return {
-      x: Math.max(8, window.innerWidth - width - 16),
-      y: Math.max(8, window.innerHeight - height - 16),
-      width,
-      height,
-    }
-  })
-
-  // ─── Drag & resize dell'overlay ───────────────────────────────────────────
-  const dragStateRef = useRef<{ startX: number; startY: number; startLeft: number; startTop: number } | null>(null)
-  const resizeStateRef = useRef<{ startX: number; startY: number; startWidth: number; startHeight: number } | null>(null)
-
-  // ─── Effects ──────────────────────────────────────────────────────────────
   useEffect(() => {
     selectedUserRef.current = selectedUser
   }, [selectedUser])
-
-  const scheduleRecoveryRefresh = useCallback(() => {
-    if (refreshTimerRef.current != null) {
-      window.clearTimeout(refreshTimerRef.current)
-    }
-
-    refreshTimerRef.current = window.setTimeout(() => {
-      window.location.reload()
-    }, CALL_RECOVERY_REFRESH_DELAY_MS)
-  }, [])
-
-  const clampOverlayRect = useCallback((next: { x: number; y: number; width: number; height: number }) => {
-    const margin = 8
-    const viewportWidth = window.innerWidth
-    const viewportHeight = window.innerHeight
-
-    const maxWidth = Math.max(OVERLAY_MIN_WIDTH, viewportWidth - margin * 2)
-    const maxHeight = Math.max(OVERLAY_MIN_HEIGHT, viewportHeight - margin * 2)
-
-    const width = Math.min(Math.max(next.width, OVERLAY_MIN_WIDTH), maxWidth)
-    const height = Math.min(Math.max(next.height, OVERLAY_MIN_HEIGHT), maxHeight)
-
-    const maxX = Math.max(margin, viewportWidth - width - margin)
-    const maxY = Math.max(margin, viewportHeight - height - margin)
-    const x = Math.min(Math.max(next.x, margin), maxX)
-    const y = Math.min(Math.max(next.y, margin), maxY)
-
-    return { x, y, width, height }
-  }, [])
-
-  useEffect(() => {
-    const handleMove = (event: MouseEvent) => {
-      if (dragStateRef.current) {
-        const deltaX = event.clientX - dragStateRef.current.startX
-        const deltaY = event.clientY - dragStateRef.current.startY
-        setOverlayRect(prev => clampOverlayRect({
-          ...prev,
-          x: dragStateRef.current!.startLeft + deltaX,
-          y: dragStateRef.current!.startTop + deltaY,
-        }))
-      }
-
-      if (resizeStateRef.current) {
-        const deltaX = event.clientX - resizeStateRef.current.startX
-        const deltaY = event.clientY - resizeStateRef.current.startY
-        setOverlayRect(prev => clampOverlayRect({
-          ...prev,
-          width: resizeStateRef.current!.startWidth + deltaX,
-          height: resizeStateRef.current!.startHeight + deltaY,
-        }))
-      }
-    }
-
-    const handleUp = () => {
-      dragStateRef.current = null
-      resizeStateRef.current = null
-    }
-
-    const handleViewportResize = () => {
-      setOverlayRect(prev => clampOverlayRect(prev))
-    }
-
-    window.addEventListener('mousemove', handleMove)
-    window.addEventListener('mouseup', handleUp)
-    window.addEventListener('resize', handleViewportResize)
-    return () => {
-      window.removeEventListener('mousemove', handleMove)
-      window.removeEventListener('mouseup', handleUp)
-      window.removeEventListener('resize', handleViewportResize)
-    }
-  }, [clampOverlayRect])
 
   useEffect(() => {
     let mounted = true
@@ -231,46 +98,6 @@ export default function UserPage() {
     }
     void load()
   }, [user])
-
-  useEffect(() => {
-    setOnSignaling(handleSignaling)
-  }, [setOnSignaling, handleSignaling])
-
-  useEffect(() => {
-    if (callState !== 'calling' || activeCallTargetUserId == null) {
-      return
-    }
-
-    const timer = window.setTimeout(() => {
-      setTimeoutMessage('Nessuna risposta entro 30 secondi. Ricarico la pagina per ripristinare la sessione chiamata.')
-      hangup()
-      scheduleRecoveryRefresh()
-    }, CALL_TIMEOUT_MS)
-
-    return () => window.clearTimeout(timer)
-  }, [callState, activeCallTargetUserId, hangup, scheduleRecoveryRefresh])
-
-  useEffect(() => {
-    if (callState !== 'incoming') {
-      return
-    }
-
-    const timer = window.setTimeout(() => {
-      rejectCall('timeout')
-      setTimeoutMessage('La chiamata in arrivo è scaduta dopo 30 secondi. Ricarico la pagina per ripristinare la sessione chiamata.')
-      scheduleRecoveryRefresh()
-    }, CALL_TIMEOUT_MS)
-
-    return () => window.clearTimeout(timer)
-  }, [callState, rejectCall, scheduleRecoveryRefresh])
-
-  useEffect(() => {
-    return () => {
-      if (refreshTimerRef.current != null) {
-        window.clearTimeout(refreshTimerRef.current)
-      }
-    }
-  }, [])
 
   useEffect(() => {
     setOnHistory((payload) => {
@@ -341,9 +168,10 @@ export default function UserPage() {
     container.scrollTop = container.scrollHeight
   }, [messages])
 
-  // ─── Messaggi ─────────────────────────────────────────────────────────────
-  const visibleUsers = useMemo(() => {
+  // Filtra solo utenti con richieste non lette
+  const usersWithRequests = useMemo(() => {
     return users
+      .filter(u => (unreadCountByUserId[u.userId] ?? 0) > 0)
       .map(u => ({
         ...u,
         status: presences[u.username] ?? ('offline' as PresenceStatus),
@@ -367,52 +195,7 @@ export default function UserPage() {
 
   const selectedPresence = selectedUser ? presences[selectedUser.username] : undefined
 
-  const incomingCallerName = useMemo(() => {
-    if (!incomingCall) return ''
-    const found = users.find(u => u.userId === incomingCall.fromUserId)
-    return found?.username ?? `Utente #${incomingCall.fromUserId}`
-  }, [incomingCall, users])
-
-  const activePeerName = useMemo(() => {
-    if (callState === 'incoming' && incomingCall) {
-      return incomingCallerName
-    }
-    if (activeCallTargetUserId != null) {
-      const found = users.find(u => u.userId === activeCallTargetUserId)
-      if (found) return found.username
-    }
-    if (selectedUser) return selectedUser.username
-    return 'Utente'
-  }, [callState, incomingCall, incomingCallerName, activeCallTargetUserId, users, selectedUser])
-
-  // ─── Azioni ───────────────────────────────────────────────────────────────
-  const handleOverlayDragStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    const target = event.target as HTMLElement
-    if (target.closest('button')) {
-      return
-    }
-
-    dragStateRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      startLeft: overlayRect.x,
-      startTop: overlayRect.y,
-    }
-  }, [overlayRect.x, overlayRect.y])
-
-  const handleOverlayResizeStart = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    event.stopPropagation()
-    resizeStateRef.current = {
-      startX: event.clientX,
-      startY: event.clientY,
-      startWidth: overlayRect.width,
-      startHeight: overlayRect.height,
-    }
-  }, [overlayRect.height, overlayRect.width])
-
   async function handleLogout() {
-    disconnect()
     await logout()
     navigate('/login')
   }
@@ -470,48 +253,15 @@ export default function UserPage() {
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
       <PageAppBar
         title="PFCWB-Chat"
-        onTitleClick={() => navigate('/')}
-        links={[{ label: 'Gestione Profilo', onClick: () => navigate('/user/profile') }]}
+        onTitleClick={() => navigate('/admin')}
+        links={[
+          { label: 'Admin', onClick: () => navigate('/admin') },
+          { label: 'Gestione Iscritti', onClick: () => navigate('/admin/gestione-iscritti') },
+        ]}
         mode={mode}
         onToggleMode={toggleMode}
         onLogout={() => void handleLogout()}
       />
-
-      {/* Greeting bar */}
-      {user && (
-        <Box
-          sx={{
-            position: 'fixed',
-            top: { xs: 56, md: 64 },
-            left: 0,
-            right: 0,
-            zIndex: 1100,
-            px: 3,
-            py: 0.75,
-            bgcolor: 'background.paper',
-            borderBottom: '1px solid',
-            borderColor: 'divider',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <Typography variant="body2" sx={{ fontWeight: 600 }}>
-            Ciao {user.username}!
-          </Typography>
-          <ToggleButtonGroup
-            value={presences[user.username] === 'nonAlComputer' ? 'nonAlComputer' : 'online'}
-            exclusive
-            size="small"
-            onChange={(_, v: 'online' | 'nonAlComputer' | null) => {
-              if (v) setPresenceStatus(v)
-            }}
-          >
-            <ToggleButton value="online" color="success">Online</ToggleButton>
-            <ToggleButton value="nonAlComputer" color="warning">Non al computer</ToggleButton>
-          </ToggleButtonGroup>
-        </Box>
-      )}
 
       <Box sx={{ pt: { xs: 14, md: 15 } }}>
         {loadError && (
@@ -526,21 +276,20 @@ export default function UserPage() {
           </Container>
         )}
 
-        {/* Two-card section */}
         <Container
           maxWidth="xl"
           sx={{ px: { xs: 1, md: 2 }, height: { xs: 'auto', md: 'calc(100vh - 90px)' }, mb: '15px' }}
         >
           <Grid container spacing={2} sx={{ height: '100%' }}>
 
-            {/* Left: User list */}
+            {/* Left: User list with requests */}
             <Grid size={{ xs: 12, md: 4 }}>
               <ChatUserListCard
-                title="Utenti"
+                title="Richieste"
                 connected={connected}
                 usersCollapsed={usersCollapsed}
                 onToggleCollapsed={() => setUsersCollapsed((v) => !v)}
-                users={visibleUsers.map((u) => ({
+                users={usersWithRequests.map((u) => ({
                   userId: u.userId,
                   username: u.username,
                   status: u.status,
@@ -549,22 +298,22 @@ export default function UserPage() {
                 }))}
                 selectedUserId={selectedUser?.userId ?? null}
                 onSelectUser={handleSelectUser}
-                emptyConnectedText="Nessun altro utente disponibile al momento"
+                emptyConnectedText="Nessuna richiesta in sospeso"
                 emptyDisconnectedText="Connessione in corso..."
               />
             </Grid>
 
-            {/* Right: Chat + Video */}
+            {/* Right: Chat */}
             <Grid size={{ xs: 12, md: 8 }}>
               <Card sx={{ height: 600, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {!selectedUser ? (
                   <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 4 }}>
                     <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                       <Typography variant="h6" color="text.secondary" sx={{ fontWeight: 400 }}>
-                        Seleziona un utente per chattare
+                        Seleziona una richiesta per leggere e rispondere
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Gli utenti online appaiono nella lista a sinistra
+                        Le richieste con messaggi non letti appaiono nella lista a sinistra
                       </Typography>
                     </Stack>
                   </Box>
@@ -591,17 +340,6 @@ export default function UserPage() {
                           <Typography variant="caption" color="text.secondary">{statusLabel(selectedPresence)}</Typography>
                         </Stack>
                       </Stack>
-                      <Tooltip title="Avvia videochiamata">
-                        <span>
-                          <IconButton
-                            color="primary"
-                            onClick={() => void startCall(selectedUser.userId)}
-                            disabled={!connected || !selectedPresence || selectedPresence === 'offline' || callState !== 'idle'}
-                          >
-                            <VideocamRoundedIcon />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
                     </Stack>
 
                     {/* Messages */}
@@ -618,15 +356,10 @@ export default function UserPage() {
                         gap: 1,
                       }}
                     >
-                      {historyLoading && hasMoreHistory && (
-                        <Box sx={{ textAlign: 'center', mb: 1 }}>
-                          <CircularProgress size={18} />
-                        </Box>
-                      )}
                       {messages.length === 0 && !historyLoading && (
                         <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                           <Typography variant="body2" color="text.secondary">
-                            Nessun messaggio. Di&apos; ciao a {selectedUser.username}!
+                            Nessun messaggio da {selectedUser.username}
                           </Typography>
                         </Box>
                       )}
@@ -656,7 +389,7 @@ export default function UserPage() {
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
                         <TextField
                           fullWidth multiline maxRows={4} size="small"
-                          placeholder={connected ? 'Scrivi un messaggio...' : 'Connessione in corso...'}
+                          placeholder={connected ? 'Scrivi una risposta...' : 'Connessione in corso...'}
                           value={messageInput}
                           onChange={e => setMessageInput(e.target.value)}
                           onKeyDown={e => {
@@ -680,60 +413,6 @@ export default function UserPage() {
           </Grid>
         </Container>
       </Box>
-
-      <Snackbar
-        open={callState === 'incoming' && incomingCall != null}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        onClose={() => rejectCall()}
-      >
-        <Alert
-          severity="info"
-          sx={{ width: '100%' }}
-          action={(
-            <Stack direction="row" spacing={1}>
-              <Button color="success" size="small" variant="contained" onClick={() => void acceptCall()}>
-                Accetta
-              </Button>
-              <Button color="error" size="small" variant="outlined" onClick={() => rejectCall()}>
-                Rifiuta
-              </Button>
-            </Stack>
-          )}
-        >
-          Chiamata in arrivo da <strong>{incomingCallerName}</strong>.
-        </Alert>
-      </Snackbar>
-
-      <CallOverlay
-        callState={callState}
-        activePeerName={activePeerName}
-        overlayRect={overlayRect}
-        localVideoRef={localVideoRef}
-        remoteVideoRef={remoteVideoRef}
-        isMicEnabled={isMicEnabled}
-        isCameraEnabled={isCameraEnabled}
-        remoteVolume={remoteVolume}
-        onOverlayDragStart={handleOverlayDragStart}
-        onOverlayResizeStart={handleOverlayResizeStart}
-        onToggleMic={toggleMic}
-        onToggleCamera={toggleCamera}
-        onSetCallVolume={setCallVolume}
-        onToggleFullscreen={toggleFullscreen}
-        onReconnectCall={reconnectCall}
-        onHangup={hangup}
-      />
-
-      <Snackbar
-        open={timeoutMessage != null}
-        autoHideDuration={4000}
-        onClose={() => setTimeoutMessage(null)}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="info" onClose={() => setTimeoutMessage(null)}>
-          {timeoutMessage}
-        </Alert>
-      </Snackbar>
-
     </Box>
   )
 }

@@ -56,6 +56,23 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
   const remoteStreamRef = useRef<MediaStream | null>(null)
   const disconnectCleanupTimerRef = useRef<number | null>(null)
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
+  const reconnectInFlightRef = useRef(false)
+  const reconnectCallRef = useRef<(() => void) | null>(null)
+
+  const attachLocalStreamToPeerConnection = useCallback((pc: RTCPeerConnection) => {
+    const stream = localStreamRef.current
+    if (!stream) return
+
+    stream.getTracks().forEach((track) => pc.addTrack(track, stream))
+  }, [])
+
+  const resetRemotePeerState = useCallback(() => {
+    pendingIceCandidatesRef.current = []
+    remoteStreamRef.current = null
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.srcObject = null
+    }
+  }, [])
 
   // ─── Candidati ICE in attesa di remoteDescription ─────────────────────────
   const flushPendingIceCandidates = useCallback(async () => {
@@ -83,6 +100,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       window.clearTimeout(disconnectCleanupTimerRef.current)
       disconnectCleanupTimerRef.current = null
     }
+    reconnectInFlightRef.current = false
 
     localStreamRef.current?.getTracks().forEach(t => t.stop())
     localStreamRef.current = null
@@ -105,6 +123,12 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
   // ─── Creazione PeerConnection ─────────────────────────────────────────────
   // Configura ontrack per ricevere lo stream remoto e onicecandidate per l'invio.
   const createPc = useCallback((toUserId: number, callId: string): RTCPeerConnection => {
+    if (pcRef.current) {
+      pcRef.current.close()
+    }
+
+    resetRemotePeerState()
+
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     pcRef.current = pc
     callIdRef.current = callId
@@ -160,24 +184,30 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       }
 
       if (state === 'connected') {
+        reconnectInFlightRef.current = false
         if (disconnectCleanupTimerRef.current != null) {
           window.clearTimeout(disconnectCleanupTimerRef.current)
           disconnectCleanupTimerRef.current = null
         }
         setCallState('connected')
       } else if (state === 'disconnected') {
+        setCallState('reconnecting')
+        if (!reconnectInFlightRef.current) {
+          reconnectCallRef.current?.()
+        }
         if (disconnectCleanupTimerRef.current == null) {
           disconnectCleanupTimerRef.current = window.setTimeout(() => {
             cleanup()
-          }, 5000)
+          }, 20000)
         }
       } else if (state === 'failed' || state === 'closed') {
+        reconnectInFlightRef.current = false
         cleanup()
       }
     }
 
     return pc
-  }, [cleanup, remoteVolume])
+  }, [cleanup, remoteVolume, resetRemotePeerState])
 
   // Mantiene il volume del video remoto sincronizzato con lo state React.
   useEffect(() => {
@@ -214,7 +244,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       void localVideoRef.current?.play().catch(() => {})
 
       const pc = createPc(toUserId, callId)
-      stream.getTracks().forEach(track => pc.addTrack(track, stream))
+      attachLocalStreamToPeerConnection(pc)
 
       const offer = await pc.createOffer()
       await pc.setLocalDescription(offer)
@@ -229,7 +259,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
     } catch {
       cleanup()
     }
-  }, [callState, createPc, cleanup])
+  }, [callState, createPc, cleanup, attachLocalStreamToPeerConnection])
 
   const acceptCall = useCallback(async () => {
     if (!incomingCall || callState !== 'incoming') return
@@ -241,7 +271,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       void localVideoRef.current?.play().catch(() => {})
 
       const pc = createPc(fromUserId, callId)
-      stream.getTracks().forEach(track => pc.addTrack(track, stream))
+      attachLocalStreamToPeerConnection(pc)
 
       await pc.setRemoteDescription(new RTCSessionDescription(description))
       await flushPendingIceCandidates()
@@ -259,7 +289,49 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
     } catch {
       cleanup()
     }
-  }, [incomingCall, callState, createPc, cleanup, flushPendingIceCandidates])
+  }, [incomingCall, callState, createPc, cleanup, flushPendingIceCandidates, attachLocalStreamToPeerConnection])
+
+  const reconnectCall = useCallback(async () => {
+    if (reconnectInFlightRef.current) return
+
+    const targetId = activeTargetRef.current ?? activeCallTargetUserId
+    const callId = callIdRef.current
+    const stream = localStreamRef.current
+
+    if (targetId == null || !callId || !stream) {
+      return
+    }
+
+    reconnectInFlightRef.current = true
+    try {
+      setCallState('reconnecting')
+
+      const pc = createPc(targetId, callId)
+      attachLocalStreamToPeerConnection(pc)
+
+      const offer = await pc.createOffer({ iceRestart: true })
+      await pc.setLocalDescription(offer)
+      const serializedOffer: SerializableSessionDescription = {
+        type: offer.type,
+        sdp: offer.sdp ?? undefined,
+      }
+      sendRef.current('offer', targetId, { callId, description: serializedOffer })
+    } catch {
+      setCallState('reconnecting')
+    } finally {
+      reconnectInFlightRef.current = false
+    }
+  }, [activeCallTargetUserId, attachLocalStreamToPeerConnection, createPc])
+
+  useEffect(() => {
+    reconnectCallRef.current = () => {
+      void reconnectCall()
+    }
+
+    return () => {
+      reconnectCallRef.current = null
+    }
+  }, [reconnectCall])
 
   const rejectCall = useCallback((reason: string = 'rejected') => {
     if (!incomingCall) return
@@ -334,6 +406,36 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
     if (action === 'offer') {
       const description = p?.description as RTCSessionDescriptionInit | undefined
       if (!description || !callId) return
+
+      const isReconnectOffer =
+        callIdRef.current === callId &&
+        activeTargetRef.current === fromUserId &&
+        (callState === 'connected' || callState === 'calling' || callState === 'reconnecting')
+
+      if (isReconnectOffer) {
+        const pc = pcRef.current ?? createPc(fromUserId, callId)
+        if (pc.getSenders().length === 0) {
+          attachLocalStreamToPeerConnection(pc)
+        }
+
+        void pc.setRemoteDescription(new RTCSessionDescription(description))
+          .then(async () => {
+            await flushPendingIceCandidates()
+            const answer = await pc.createAnswer()
+            await pc.setLocalDescription(answer)
+            const serializedAnswer: SerializableSessionDescription = {
+              type: answer.type,
+              sdp: answer.sdp ?? undefined,
+            }
+            sendRef.current('answer', fromUserId, { callId, description: serializedAnswer })
+            setCallState('connected')
+          })
+          .catch(() => {
+            cleanup()
+          })
+        return
+      }
+
       setIncomingCall({ callId, fromUserId, description })
       setCallState('incoming')
       return
@@ -371,7 +473,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       cleanup()
       return
     }
-  }, [cleanup, flushPendingIceCandidates])
+  }, [cleanup, flushPendingIceCandidates, callState, createPc, attachLocalStreamToPeerConnection])
 
   return {
     callState,
@@ -391,6 +493,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
     toggleCamera,
     setCallVolume,
     toggleFullscreen,
+    reconnectCall,
     handleSignaling,
   }
 }

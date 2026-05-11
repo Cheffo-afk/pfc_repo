@@ -1,6 +1,5 @@
 import {
   Alert,
-  AppBar,
   Box,
   Button,
   Card,
@@ -12,7 +11,6 @@ import {
   DialogContent,
   DialogTitle,
   Grid,
-  IconButton,
   List,
   ListItemButton,
   ListItemText,
@@ -21,14 +19,10 @@ import {
   TextField,
   ToggleButton,
   ToggleButtonGroup,
-  Toolbar,
   Typography,
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
-import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
-import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import {
   activateUser,
   getAdminUsers,
@@ -36,6 +30,7 @@ import {
   logout,
   toggleAdminUserSubscription,
 } from '../lib/api'
+import { PageAppBar } from '../components'
 import { useThemeMode } from '../theme/useThemeMode'
 import { disconnectWebSocket, useWebSocket } from '../lib/useWebSocket'
 import type { AdminUser } from '../types'
@@ -256,54 +251,17 @@ export default function AdminPage() {
 
   return (
     <Box sx={{ minHeight: '100vh', bgcolor: 'background.default' }}>
-      <AppBar
-        position="fixed"
-        color="transparent"
-        elevation={0}
-        sx={{ backdropFilter: 'blur(10px)', borderBottom: '1px solid', borderColor: 'divider' }}
-      >
-        <Container maxWidth="xl">
-          <Toolbar disableGutters sx={{ justifyContent: 'space-between', py: 0.8 }}>
-            <Stack direction="row" spacing={2} sx={{ alignItems: 'center' }}>
-              <Typography
-                variant="h6"
-                onClick={() => navigate('/')}
-                sx={{ fontWeight: 800, cursor: 'pointer', transition: 'opacity 0.2s', '&:hover': { opacity: 0.7 } }}
-              >
-                PFCWB-Chat
-              </Typography>
-              <Typography
-                variant="body2"
-                onClick={() => navigate('/admin/gestione-iscritti')}
-                sx={{
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  color: 'text.primary',
-                  textAlign: 'left',
-                  transition: 'opacity 0.2s',
-                  '&:hover': { opacity: 0.7 },
-                }}
-              >
-                Gestione Iscritti
-              </Typography>
-            </Stack>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <IconButton onClick={toggleMode} size="small" color="inherit">
-                {mode === 'light' ? <DarkModeRoundedIcon /> : <LightModeRoundedIcon />}
-              </IconButton>
-              <Button
-                variant="outlined"
-                color="error"
-                size="small"
-                startIcon={<LogoutRoundedIcon />}
-                onClick={() => void handleLogout()}
-              >
-                Esci
-              </Button>
-            </Stack>
-          </Toolbar>
-        </Container>
-      </AppBar>
+      <PageAppBar
+        title="PFCWB-Chat"
+        onTitleClick={() => navigate('/')}
+        links={[
+          { label: 'Gestione Iscritti', onClick: () => navigate('/admin/gestione-iscritti') },
+          { label: 'Richieste', onClick: () => navigate('/admin/richieste') },
+        ]}
+        mode={mode}
+        onToggleMode={toggleMode}
+        onLogout={() => void handleLogout()}
+      />
 
       <Box sx={{ pt: { xs: 3.5, md: 3.5 } }}>
         <Container maxWidth="lg" sx={{ py: { xs: 4, md: 8 }, mb: '10px' }}>

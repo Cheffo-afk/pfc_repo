@@ -139,7 +139,7 @@ export type HistoryResult = {
 
 // ─── WebRTC types ─────────────────────────────────────────────────────────────
 
-export type CallState = 'idle' | 'calling' | 'incoming' | 'connected'
+export type CallState = 'idle' | 'calling' | 'incoming' | 'connected' | 'reconnecting'
 
 export type IncomingCallInfo = {
   callId: string

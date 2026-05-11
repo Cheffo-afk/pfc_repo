@@ -4,11 +4,11 @@ import { Navigate, useLocation } from 'react-router-dom'
 import { getMe } from './api'
 import type { AuthUser } from '../types'
 
-// RouteGuard verifica la sessione ad ogni cambio di pathname.
-// Se la sessione non è valida → redirect /login.
-// Se il ruolo non corrisponde a requiredRole → mostra errore 403.
+// ______ RouteGuard: verifica la sessione ad ogni cambio di pathname ______
+// ______ Se la sessione non e' valida → redirect /login ______
+// ______ Se il ruolo non corrisponde a requiredRole → errore 403 ______
 type RouteGuardProps = PropsWithChildren<{
-  // Se non specificato, basta che l'utente sia autenticato.
+  // ______ Se non specificato, basta che l'utente sia autenticato ______
   requiredRole?: AuthUser['role']
 }>
 

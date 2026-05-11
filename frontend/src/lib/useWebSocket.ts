@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-// URL WebSocket: configurabile via VITE_WS_URL.
-// Se VITE_WS_URL non include un path, forza automaticamente "/ws".
+// ______ URL WebSocket: configurabile via VITE_WS_URL ______
+// ______ Se non include un path, forza automaticamente "/ws" ______
 function resolveWebSocketUrl() {
   const fromEnv = (import.meta.env.VITE_WS_URL as string | undefined)?.trim()
   const fallback = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`
@@ -15,7 +15,7 @@ function resolveWebSocketUrl() {
     const isAbsolute = /^(wss?:|https?:)/i.test(fromEnv)
     const parsed = new URL(fromEnv, isAbsolute ? undefined : window.location.origin)
 
-    // Permette anche URL http/https in env convertendole alla controparte ws/wss.
+    // ______ Permette URL http/https in env: vengono convertiti in ws/wss ______
     if (parsed.protocol === 'http:') {
       parsed.protocol = 'ws:'
     }
@@ -37,7 +37,8 @@ const WS_URL = resolveWebSocketUrl()
 
 import type { PresenceStatus, ChatMessage, HistoryResult } from '../types'
 
-// Handler interni — non esposti all'esterno, usati solo dai ref.
+// ─── Stato globale singleton ─────────────────────────────────────────────────
+// ______ Handler interni: non esposti all'esterno, usati solo dai ref del hook ______
 type ChatHandler = (msg: ChatMessage) => void
 type HistoryHandler = (result: HistoryResult) => void
 type SignalingHandler = (action: string, fromUserId: number, payload: unknown) => void
@@ -206,6 +207,8 @@ function ensureSharedSocketStarted() {
 
 function disconnectSharedSocket() {
   reconnectEnabled = false
+  // ______ Reset del flag cosi' la riconnessione e' possibile al prossimo login ______
+  hasStarted = false
 
   if (reconnectTimer !== null) {
     window.clearTimeout(reconnectTimer)
@@ -225,8 +228,8 @@ export function disconnectWebSocket() {
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
-// Gestisce l'intero ciclo di vita WebSocket: connessione, riconnessione automatica,
-// parsing messaggi e smistamento sui canali (chat, presenza, signaling).
+// ______ Gestisce il ciclo di vita WebSocket: connessione, riconnessione, ______
+// ______ parsing messaggi e smistamento sui canali (chat, presenza, signaling) ______
 export function useWebSocket() {
   const [state, setState] = useState<WsSnapshot>(snapshot)
   const onMessageRef = useRef<ChatHandler | null>(null)

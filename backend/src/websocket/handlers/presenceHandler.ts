@@ -32,12 +32,15 @@ function isPresenceStatus(value: unknown): value is PresenceStatus {
   );
 }
 
+// ______ Ordine di priorita': online > nonAlComputer > offline ______
 function getStatusPriority(status: PresenceStatus) {
   if (status === "online") return 3;
   if (status === "nonAlComputer") return 2;
   return 1;
 }
 
+// ______ Calcola lo stato migliore tra tutti i socket di uno stesso userId ______
+// ______ Un utente con piu' tab aperte risulta online se almeno una lo e' ______
 function getAggregatedUserStatus(
   context: WsContext,
   userId: number,
@@ -63,6 +66,7 @@ function getAggregatedUserStatus(
   return best ?? "offline";
 }
 
+// ______ Costruisce la mappa username->status pubblica (un entry per username) ______
 function buildPublicPresenceSnapshot(context: WsContext) {
   const byUsername = new Map<string, PresenceStatus>();
 
@@ -84,8 +88,9 @@ function buildPublicPresenceSnapshot(context: WsContext) {
   }));
 }
 
+// ______ Invia lo snapshot presenza aggiornato a tutti i client connessi ______
 function broadcastStatuses(context: WsContext) {
-  // ______ Expose only public presence data ______
+  // ______ Espone solo dati pubblici: nessun userId, solo username e stato ______
   const users = buildPublicPresenceSnapshot(context);
 
   context.clients.forEach((clientSocket) => {
