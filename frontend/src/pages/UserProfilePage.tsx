@@ -15,11 +15,11 @@ import {
 import LockRoundedIcon from '@mui/icons-material/LockRounded'
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent, type PointerEvent as ReactPointerEvent, type SyntheticEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { changePassword, getMe, logout, updateMyProfile, uploadProfilePicture } from '../lib/api'
+import { changePassword, logout, updateMyProfile, uploadProfilePicture } from '../lib/api'
 import { PageAppBar, UserAvatar } from '../components'
 import { disconnectWebSocket } from '../lib/useWebSocket'
 import { useThemeMode } from '../theme/useThemeMode'
-import type { AuthUser } from '../types'
+import { useAuth } from '../lib/useAuth'
 
 // ─── Costanti ────────────────────────────────────────────────────────────────
 // ______ Dimensioni del cropper avatar: stage, foro circolare, esportazione finale ______
@@ -40,9 +40,7 @@ function descriptionStorageKey(userId: number) {
 export default function UserProfilePage() {
   const navigate = useNavigate()
   const { mode, toggleMode } = useThemeMode()
-
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [loadError, setLoadError] = useState<string | null>(null)
+  const { user, refreshAuth, clearAuth } = useAuth()
 
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -74,38 +72,24 @@ export default function UserProfilePage() {
   })
 
   useEffect(() => {
-    let mounted = true
-
-    async function load() {
-      try {
-        const me = await getMe()
-        if (!mounted) return
-        const localDescription = window.localStorage.getItem(descriptionStorageKey(me.userId)) ?? ''
-        setUser(me)
-        setProfileForm({
-          username: me.username,
-          telefono: me.anagraphicsRef?.telefono ?? '',
-          indirizzo: me.anagraphicsRef?.indirizzo ?? '',
-          descrizione: localDescription,
-        })
-      } catch {
-        if (!mounted) return
-        setLoadError('Sessione scaduta. Effettua di nuovo il login.')
-        setTimeout(() => navigate('/login'), 2000)
-      }
+    if (!user) {
+      return
     }
 
-    void load()
-
-    return () => {
-      mounted = false
-    }
-  }, [navigate])
+    const localDescription = window.localStorage.getItem(descriptionStorageKey(user.userId)) ?? ''
+    setProfileForm({
+      username: user.username,
+      telefono: user.anagraphicsRef?.telefono ?? '',
+      indirizzo: user.anagraphicsRef?.indirizzo ?? '',
+      descrizione: localDescription,
+    })
+  }, [user])
 
   // ─── Azioni ───────────────────────────────────────────────────────────────
   async function handleLogout() {
     disconnectWebSocket()
     await logout()
+    clearAuth()
     navigate('/login')
   }
 
@@ -157,9 +141,12 @@ export default function UserProfilePage() {
 
       window.localStorage.setItem(descriptionStorageKey(user.userId), profileForm.descrizione.trim())
 
-      const me = await getMe()
+      const me = await refreshAuth()
+      if (!me) {
+        navigate('/login')
+        return
+      }
       const localDescription = window.localStorage.getItem(descriptionStorageKey(me.userId)) ?? ''
-      setUser(me)
       setProfileForm({
         username: me.username,
         telefono: me.anagraphicsRef?.telefono ?? '',
@@ -380,8 +367,11 @@ export default function UserProfilePage() {
       const croppedFile = new File([blob], `avatar_${Date.now()}.jpg`, { type: 'image/jpeg' })
       await uploadProfilePicture(user.userId, croppedFile)
 
-      const me = await getMe()
-      setUser(me)
+      const me = await refreshAuth()
+      if (!me) {
+        navigate('/login')
+        return
+      }
       setProfileFeedback({ type: 'success', text: 'Immagine profilo aggiornata con successo.' })
       resetCropState()
     } catch (error) {
@@ -410,8 +400,11 @@ export default function UserProfilePage() {
       setNewPassword('')
       setConfirmPassword('')
 
-      const me = await getMe()
-      setUser(me)
+      const me = await refreshAuth()
+      if (!me) {
+        navigate('/login')
+        return
+      }
     } catch (error) {
       setPwFeedback({
         type: 'error',
@@ -435,8 +428,6 @@ export default function UserProfilePage() {
 
       <Container maxWidth="md" sx={{ pt: { xs: 11, md: 12 }, pb: 4 }}>
         <Stack spacing={3}>
-          {loadError && <Alert severity="error">{loadError}</Alert>}
-
           {user?.mustChangePassword && (
             <Alert severity="warning">Per la tua sicurezza, imposta una nuova password prima di continuare.</Alert>
           )}

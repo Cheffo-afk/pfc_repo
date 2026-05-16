@@ -13,17 +13,21 @@ import SendRoundedIcon from '@mui/icons-material/SendRounded'
 import { useMediaQuery, useTheme } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { getMe, getUsers, logout } from '../lib/api'
+import { getUsers, logout } from '../lib/api'
 import { ChatUserListCard, PageAppBar, UserAvatar } from '../components'
 import { useThemeMode } from '../theme/useThemeMode'
 import { useWebSocket } from '../lib/useWebSocket'
 import { statusLabel, formatTime } from '../lib/presenceUtils'
-import type { AuthUser, PublicUser, PresenceStatus, ChatMessage } from '../types'
+import type { PublicUser, PresenceStatus, ChatMessage } from '../types'
+import { useAuth } from '../lib/useAuth'
+
+const HISTORY_MAX_MESSAGES = 30
 
 // ─── Componente ──────────────────────────────────────────────────────────────────
 
 export default function RequestsPage() {
   const navigate = useNavigate()
+  const { user, clearAuth } = useAuth()
   const { mode, toggleMode } = useThemeMode()
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
@@ -38,9 +42,7 @@ export default function RequestsPage() {
     setOnHistory,
   } = useWebSocket()
 
-  const [user, setUser] = useState<AuthUser | null>(null)
   const [users, setUsers] = useState<PublicUser[]>([])
-  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [selectedUser, setSelectedUser] = useState<{ userId: number; username: string } | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -64,23 +66,6 @@ export default function RequestsPage() {
   }, [selectedUser])
 
   useEffect(() => {
-    let mounted = true
-    async function load() {
-      try {
-        const me = await getMe()
-        if (!mounted) return
-        setUser(me)
-      } catch {
-        if (!mounted) return
-        setLoadError('Sessione scaduta. Effettua di nuovo il login.')
-        setTimeout(() => navigate('/login'), 2000)
-      }
-    }
-    void load()
-    return () => { mounted = false }
-  }, [navigate])
-
-  useEffect(() => {
     if (!user) return
     async function load() {
       try {
@@ -93,7 +78,7 @@ export default function RequestsPage() {
           ),
         )
       } catch {
-        // non-critical
+        // non bloccante
       }
     }
     void load()
@@ -101,12 +86,17 @@ export default function RequestsPage() {
 
   useEffect(() => {
     setOnHistory((payload) => {
-      setHistoryLoading(false)
-      setHasMoreHistory(payload.hasMore)
       setMessages(prev => {
         const knownMessageIds = new Set(prev.map(message => message.messageId))
         const nextMessages = payload.messages.filter(message => !knownMessageIds.has(message.messageId))
-        return [...nextMessages, ...prev]
+        const merged = [...nextMessages, ...prev]
+        const bounded = merged.length > HISTORY_MAX_MESSAGES
+          ? merged.slice(merged.length - HISTORY_MAX_MESSAGES)
+          : merged
+
+        setHasMoreHistory(payload.hasMore && bounded.length < HISTORY_MAX_MESSAGES)
+        setHistoryLoading(false)
+        return bounded
       })
     })
   }, [setOnHistory])
@@ -146,7 +136,10 @@ export default function RequestsPage() {
           return prev
         }
 
-        return [...prev, msg]
+        const next = [...prev, msg]
+        return next.length > HISTORY_MAX_MESSAGES
+          ? next.slice(next.length - HISTORY_MAX_MESSAGES)
+          : next
       })
     })
   }, [setOnMessage, users, user?.username])
@@ -197,6 +190,7 @@ export default function RequestsPage() {
 
   async function handleLogout() {
     await logout()
+    clearAuth()
     navigate('/login')
   }
 
@@ -264,12 +258,6 @@ export default function RequestsPage() {
       />
 
       <Box sx={{ pt: { xs: 14, md: 15 } }}>
-        {loadError && (
-          <Container maxWidth="xl" sx={{ pt: 2 }}>
-            <Alert severity="error">{loadError}</Alert>
-          </Container>
-        )}
-
         {wsError && (
           <Container maxWidth="xl" sx={{ pt: 2 }}>
             <Alert severity="warning">WebSocket: {wsError}</Alert>

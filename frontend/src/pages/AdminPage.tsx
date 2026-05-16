@@ -26,7 +26,6 @@ import { useNavigate } from 'react-router-dom'
 import {
   activateUser,
   getAdminUsers,
-  getMe,
   logout,
   toggleAdminUserSubscription,
 } from '../lib/api'
@@ -34,6 +33,7 @@ import { PageAppBar } from '../components'
 import { useThemeMode } from '../theme/useThemeMode'
 import { disconnectWebSocket, useWebSocket } from '../lib/useWebSocket'
 import type { AdminUser } from '../types'
+import { useAuth } from '../lib/useAuth'
 
 type SortMode = 'status' | 'userId'
 type SortDirection = 'asc' | 'desc'
@@ -60,6 +60,7 @@ function getStatusChipColor(status: 'online' | 'offline' | 'nonAlComputer') {
 
 export default function AdminPage() {
   const navigate = useNavigate()
+  const { clearAuth } = useAuth()
   const { mode, toggleMode } = useThemeMode()
   const { presences } = useWebSocket()
   const [users, setUsers] = useState<AdminUser[]>([])
@@ -80,6 +81,7 @@ export default function AdminPage() {
   async function handleLogout() {
     disconnectWebSocket()
     await logout()
+    clearAuth()
     navigate('/login')
   }
 
@@ -89,13 +91,6 @@ export default function AdminPage() {
     async function bootstrap() {
       try {
         setLoading(true)
-        const me = await getMe()
-        if (me.role !== 'admin') {
-          if (!mounted) return
-          setAuthError('Questa pagina e disponibile solo per amministratori.')
-          return
-        }
-
         const list = await getAdminUsers()
         if (!mounted) return
 
@@ -142,7 +137,7 @@ export default function AdminPage() {
     const normalizedQuery = query.trim().toLowerCase()
 
     const filtered = usersWithPresence.filter((u) => {
-      // Filter by subscription status
+      // Filtra per stato di abbonamento
       if (subscriptionFilter !== 'all' && u.subscribed !== subscriptionFilter) {
         return false
       }

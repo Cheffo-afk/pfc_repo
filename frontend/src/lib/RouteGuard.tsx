@@ -1,7 +1,7 @@
 import { Alert, Box, CircularProgress, Container } from '@mui/material'
-import { useEffect, useState, type PropsWithChildren } from 'react'
+import { useEffect, type PropsWithChildren } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
-import { getMe } from './api'
+import { useAuth } from './useAuth'
 import type { AuthUser } from '../types'
 
 // ______ RouteGuard: verifica la sessione ad ogni cambio di pathname ______
@@ -14,33 +14,11 @@ type RouteGuardProps = PropsWithChildren<{
 
 export function RouteGuard({ children, requiredRole }: RouteGuardProps) {
   const location = useLocation()
-  const [loading, setLoading] = useState(true)
-  const [me, setMe] = useState<AuthUser | null>(null)
+  const { user, loading, refreshAuth } = useAuth()
 
   useEffect(() => {
-    let mounted = true
-
-    const loadMe = async () => {
-      try {
-        const user = await getMe()
-        if (!mounted) return
-        setMe(user)
-      } catch {
-        if (!mounted) return
-        setMe(null)
-      } finally {
-        if (mounted) {
-          setLoading(false)
-        }
-      }
-    }
-
-    void loadMe()
-
-    return () => {
-      mounted = false
-    }
-  }, [location.pathname])
+    void refreshAuth()
+  }, [location.pathname, refreshAuth])
 
   if (loading) {
     return (
@@ -50,11 +28,11 @@ export function RouteGuard({ children, requiredRole }: RouteGuardProps) {
     )
   }
 
-  if (!me) {
+  if (!user) {
     return <Navigate to="/login" replace />
   }
 
-  if (requiredRole && me.role !== requiredRole) {
+  if (requiredRole && user.role !== requiredRole) {
     return (
       <Container maxWidth="sm" sx={{ pt: { xs: 10.25, md: 12.25 } }}>
         <Alert severity="error">Privilegi insufficienti per accedere a questa pagina.</Alert>

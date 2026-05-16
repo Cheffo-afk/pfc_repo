@@ -17,9 +17,11 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { login } from '../lib/api'
+import { useAuth } from '../lib/useAuth'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { setAuthUser, refreshAuth } = useAuth()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -33,6 +35,8 @@ export default function LoginPage() {
       setLoading(true)
       setFeedback(null)
       const response = await login(email, password)
+      setAuthUser(response.user)
+      await refreshAuth()
       navigate(response.user.role === 'admin' ? '/admin' : '/user')
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Errore login')

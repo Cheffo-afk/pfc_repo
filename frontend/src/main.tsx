@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.tsx'
 import { AppThemeProvider } from './theme/ThemeModeContext.tsx'
+import { AuthProvider } from './lib/AuthContext.tsx'
 
 // Punto di ingresso React. AppThemeProvider gestisce il tema MUI (light/dark)
 // e BrowserRouter fornisce il contesto di navigazione client-side.
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <AppThemeProvider>
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </AppThemeProvider>
     </BrowserRouter>
   </StrictMode>,

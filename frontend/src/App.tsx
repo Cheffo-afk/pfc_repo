@@ -14,8 +14,9 @@ import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useThemeMode } from './theme/useThemeMode'
-import { getAdminUsers, getMe } from './lib/api'
+import { getAdminUsers } from './lib/api'
 import { RouteGuard } from './lib/RouteGuard'
+import { useAuth } from './lib/useAuth'
 
 // ─── Lazy pages ───────────────────────────────────────────────────────────────
 // ______ Tutte le pagine sono caricate in lazy per ridurre il bundle iniziale ______
@@ -56,8 +57,8 @@ function App() {
   const navigate = useNavigate()
   const location = useLocation()
   const { mode, toggleMode } = useThemeMode()
+  const { user } = useAuth()
   const [showNavbar, setShowNavbar] = useState(false)
-  const [isAdmin, setIsAdmin] = useState(false)
   const [pendingRegistrations, setPendingRegistrations] = useState(0)
 
   // ______ Mostra/nasconde la navbar quando il cursore e' nella zona alta (entro 100px) ______
@@ -70,35 +71,7 @@ function App() {
     return () => window.removeEventListener('mousemove', handleMouseMove)
   }, [])
 
-  // ______ Risolve il ruolo corrente ad ogni cambio di pathname ______
-  // ______ per mostrare i link admin nella navbar solo quando l'utente e' admin ______
-  useEffect(() => {
-    let mounted = true
-
-    const publicPaths = ['/', '/login', '/register']
-    if (publicPaths.includes(location.pathname)) {
-      return () => {
-        mounted = false
-      }
-    }
-
-    async function resolveRole() {
-      try {
-        const me = await getMe()
-        if (!mounted) return
-        setIsAdmin(me.role === 'admin')
-      } catch {
-        if (!mounted) return
-        setIsAdmin(false)
-      }
-    }
-
-    void resolveRole()
-
-    return () => {
-      mounted = false
-    }
-  }, [location.pathname])
+  const isAdmin = user?.role === 'admin'
 
   const isPublicPath = ['/', '/login', '/register'].includes(location.pathname)
 

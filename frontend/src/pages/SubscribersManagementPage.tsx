@@ -27,7 +27,6 @@ import VisibilityOffIcon from '@mui/icons-material/VisibilityOff'
 import {
   createAdminUser,
   getAdminUsers,
-  getMe,
   logout,
   setInitialPassword,
   toggleAdminUserSubscription,
@@ -36,6 +35,7 @@ import { PageAppBar } from '../components'
 import { disconnectWebSocket } from '../lib/useWebSocket'
 import { useThemeMode } from '../theme/useThemeMode'
 import type { AdminUser } from '../types'
+import { useAuth } from '../lib/useAuth'
 
 const CREATE_SUCCESS_CLOSE_DELAY_MS = 1200
 
@@ -45,6 +45,7 @@ function toSubscriptionLabel(subscribed: AdminUser['subscribed']) {
 
 export default function SubscribersManagementPage() {
   const navigate = useNavigate()
+  const { clearAuth } = useAuth()
   const { mode, toggleMode } = useThemeMode()
   const [users, setUsers] = useState<AdminUser[]>([])
   const [selectedUserId, setSelectedUserId] = useState<number | null>(null)
@@ -83,6 +84,7 @@ export default function SubscribersManagementPage() {
   async function handleLogout() {
     disconnectWebSocket()
     await logout()
+    clearAuth()
     navigate('/login')
   }
 
@@ -103,13 +105,6 @@ export default function SubscribersManagementPage() {
     async function bootstrap() {
       try {
         setLoading(true)
-        const me = await getMe()
-        if (me.role !== 'admin') {
-          if (!mounted) return
-          setAuthError('Questa pagina e disponibile solo per amministratori.')
-          return
-        }
-
         const list = await getAdminUsers()
         if (!mounted) return
         setUsers(list)

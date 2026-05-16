@@ -11,6 +11,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { useRef, type RefObject } from 'react'
 import { UserAvatar } from '../ui/UserAvatar'
 import { statusLabel } from '../../lib/presenceUtils'
 import type { PresenceStatus } from '../../types'
@@ -34,6 +35,7 @@ type ChatUserListCardProps = {
   emptyConnectedText: string
   emptyDisconnectedText: string
   fixedHeight?: number
+  listRef?: RefObject<HTMLUListElement | null>
 }
 
 export function ChatUserListCard({
@@ -47,7 +49,10 @@ export function ChatUserListCard({
   emptyConnectedText,
   emptyDisconnectedText,
   fixedHeight = 600,
+  listRef,
 }: ChatUserListCardProps) {
+  const internalListRef = useRef<HTMLUListElement>(null)
+  const resolvedListRef = listRef ?? internalListRef
   return (
     <Card sx={{ height: { xs: usersCollapsed ? 'auto' : fixedHeight, md: fixedHeight }, display: 'flex', flexDirection: 'column' }}>
       <Stack
@@ -64,7 +69,7 @@ export function ChatUserListCard({
           />
           <IconButton
             size="small"
-            onClick={onToggleCollapsed}
+            onClick={(e) => { e.stopPropagation(); onToggleCollapsed() }}
             sx={{
               display: { xs: 'flex', md: 'none' },
               width: 28,
@@ -80,7 +85,7 @@ export function ChatUserListCard({
         </Stack>
       </Stack>
       <Divider sx={{ display: { xs: usersCollapsed ? 'none' : 'block', md: 'block' } }} />
-      <List sx={{ flex: 1, overflow: 'auto', py: 0, display: { xs: usersCollapsed ? 'none' : 'block', md: 'block' } }}>
+      <List ref={resolvedListRef} sx={{ flex: 1, overflow: 'auto', py: 0, display: { xs: usersCollapsed ? 'none' : 'block', md: 'block' } }}>
         {users.length === 0 ? (
           <Box sx={{ p: 3, textAlign: 'center' }}>
             <Typography variant="body2" color="text.secondary">

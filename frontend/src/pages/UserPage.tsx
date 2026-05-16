@@ -7,8 +7,8 @@ import {
   Container,
   Grid,
   IconButton,
-  Stack,
   Snackbar,
+  Stack,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -20,25 +20,29 @@ import VideocamRoundedIcon from '@mui/icons-material/VideocamRounded'
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useMediaQuery, useTheme } from '@mui/material'
-import { getMe, getUsers, logout } from '../lib/api'
+import { getUsers, logout } from '../lib/api'
 import { CallOverlay, ChatUserListCard, PageAppBar, UserAvatar } from '../components'
 import { useThemeMode } from '../theme/useThemeMode'
 import { useWebSocket } from '../lib/useWebSocket'
 import { statusLabel, formatTime } from '../lib/presenceUtils'
-import type { AuthUser, PublicUser, PresenceStatus, ChatMessage } from '../types'
+import type { PublicUser, PresenceStatus, ChatMessage } from '../types'
 import { useWebRTC } from '../lib/useWebRTC'
+import { useAuth } from '../lib/useAuth'
 
 const CALL_TIMEOUT_MS = 30_000
 const CALL_RECOVERY_REFRESH_DELAY_MS = 1_500
 const OVERLAY_MIN_WIDTH = 340
 const OVERLAY_MIN_HEIGHT = 260
+const HISTORY_MAX_MESSAGES = 30
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 export default function UserPage() {
   const navigate = useNavigate()
+  const { user, clearAuth } = useAuth()
   const { mode, toggleMode } = useThemeMode()
   const theme = useTheme()
   const isMobile = useMediaQuery(theme.breakpoints.down('md'))
+  const isXs = useMediaQuery(theme.breakpoints.only('xs'))
 
   // ─── WebSocket e WebRTC ───────────────────────────────────────────────────
   const {
@@ -76,9 +80,7 @@ export default function UserPage() {
     handleSignaling,
   } = useWebRTC(sendSignaling)
 
-  const [user, setUser] = useState<AuthUser | null>(null)
   const [users, setUsers] = useState<PublicUser[]>([])
-  const [loadError, setLoadError] = useState<string | null>(null)
 
   const [selectedUser, setSelectedUser] = useState<{ userId: number; username: string } | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -90,8 +92,10 @@ export default function UserPage() {
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const historyRestoreRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const userListRef = useRef<HTMLUListElement | null>(null)
 
-  // Auto-collapse user list when switching to mobile, reopen on desktop
+  // Collassa la lista utenti passando a mobile, riaprila su desktop
   useEffect(() => {
     setUsersCollapsed(isMobile)
   }, [isMobile])
@@ -197,23 +201,6 @@ export default function UserPage() {
   }, [clampOverlayRect])
 
   useEffect(() => {
-    let mounted = true
-    async function load() {
-      try {
-        const me = await getMe()
-        if (!mounted) return
-        setUser(me)
-      } catch {
-        if (!mounted) return
-        setLoadError('Sessione scaduta. Effettua di nuovo il login.')
-        setTimeout(() => navigate('/login'), 2000)
-      }
-    }
-    void load()
-    return () => { mounted = false }
-  }, [navigate])
-
-  useEffect(() => {
     if (!user) return
     async function load() {
       try {
@@ -226,7 +213,7 @@ export default function UserPage() {
           ),
         )
       } catch {
-        // non-critical
+        // non bloccante
       }
     }
     void load()
@@ -274,12 +261,17 @@ export default function UserPage() {
 
   useEffect(() => {
     setOnHistory((payload) => {
-      setHistoryLoading(false)
-      setHasMoreHistory(payload.hasMore)
       setMessages(prev => {
         const knownMessageIds = new Set(prev.map(message => message.messageId))
         const nextMessages = payload.messages.filter(message => !knownMessageIds.has(message.messageId))
-        return [...nextMessages, ...prev]
+        const merged = [...nextMessages, ...prev]
+        const bounded = merged.length > HISTORY_MAX_MESSAGES
+          ? merged.slice(merged.length - HISTORY_MAX_MESSAGES)
+          : merged
+
+        setHasMoreHistory(payload.hasMore && bounded.length < HISTORY_MAX_MESSAGES)
+        setHistoryLoading(false)
+        return bounded
       })
     })
   }, [setOnHistory])
@@ -319,7 +311,10 @@ export default function UserPage() {
           return prev
         }
 
-        return [...prev, msg]
+        const next = [...prev, msg]
+        return next.length > HISTORY_MAX_MESSAGES
+          ? next.slice(next.length - HISTORY_MAX_MESSAGES)
+          : next
       })
     })
   }, [setOnMessage, users, user?.username])
@@ -340,6 +335,26 @@ export default function UserPage() {
 
     container.scrollTop = container.scrollHeight
   }, [messages])
+
+  useEffect(() => {
+    if (!selectedUser) {
+      return
+    }
+
+    // handleSelectUser collassa già la lista.
+    // Al momento in cui questo effect gira dopo il batch, usersCollapsed è già true:
+    // si può mettere il focus sul text box in sicurezza.
+    messageInputRef.current?.focus()
+  }, [selectedUser])
+
+  useEffect(() => {
+    if (!isXs || usersCollapsed) {
+      return
+    }
+
+    const firstItem = userListRef.current?.querySelector<HTMLElement>('[role="button"]')
+    firstItem?.focus()
+  }, [isXs, usersCollapsed])
 
   // ─── Messaggi ─────────────────────────────────────────────────────────────
   const visibleUsers = useMemo(() => {
@@ -414,11 +429,14 @@ export default function UserPage() {
   async function handleLogout() {
     disconnect()
     await logout()
+    clearAuth()
     navigate('/login')
   }
 
   function handleSelectUser(u: { userId: number; username: string }) {
     if (selectedUser?.userId === u.userId) return
+
+    setUsersCollapsed(true)
     setSelectedUser(u)
     historyRestoreRef.current = null
     setUnreadCountByUserId((prev) => {
@@ -514,12 +532,6 @@ export default function UserPage() {
       )}
 
       <Box sx={{ pt: { xs: 14, md: 15 } }}>
-        {loadError && (
-          <Container maxWidth="xl" sx={{ pt: 2 }}>
-            <Alert severity="error">{loadError}</Alert>
-          </Container>
-        )}
-
         {wsError && (
           <Container maxWidth="xl" sx={{ pt: 2 }}>
             <Alert severity="warning">WebSocket: {wsError}</Alert>
@@ -540,6 +552,7 @@ export default function UserPage() {
                 connected={connected}
                 usersCollapsed={usersCollapsed}
                 onToggleCollapsed={() => setUsersCollapsed((v) => !v)}
+                listRef={userListRef}
                 users={visibleUsers.map((u) => ({
                   userId: u.userId,
                   username: u.username,
@@ -556,7 +569,7 @@ export default function UserPage() {
 
             {/* Right: Chat + Video */}
             <Grid size={{ xs: 12, md: 8 }}>
-              <Card sx={{ height: 600, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <Card sx={{ height: { xs: 500, md: 600 }, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                 {!selectedUser ? (
                   <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 4 }}>
                     <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
@@ -656,8 +669,10 @@ export default function UserPage() {
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-end' }}>
                         <TextField
                           fullWidth multiline maxRows={4} size="small"
+                          inputRef={messageInputRef}
                           placeholder={connected ? 'Scrivi un messaggio...' : 'Connessione in corso...'}
                           value={messageInput}
+                          onFocus={() => { if (isXs) setUsersCollapsed(true) }}
                           onChange={e => setMessageInput(e.target.value)}
                           onKeyDown={e => {
                             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSendMessage() }

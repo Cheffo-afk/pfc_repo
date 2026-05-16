@@ -35,7 +35,7 @@ type UseWebRTCOptions = {
 export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOptions) {
   // ─── State ────────────────────────────────────────────────────────────────
   const initialIncomingCall = options?.initialIncomingCall ?? null
-  // Keep sendSignaling in a ref to avoid stale closures inside callbacks
+  // sendSignaling è tenuto in un ref per evitare closures obsolete nei callback
   const sendRef = useRef<SendSignalingFn>(sendSignaling)
   useEffect(() => { sendRef.current = sendSignaling }, [sendSignaling])
 
@@ -88,7 +88,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       try {
         await pc.addIceCandidate(new RTCIceCandidate(candidate))
       } catch {
-        // Ignore malformed/outdated candidates and continue with valid ones.
+        // Ignora candidati malformati o scaduti e continua con quelli validi.
       }
     }
   }, [])
@@ -149,8 +149,8 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
     }
 
     pc.ontrack = ({ streams, track }) => {
-      // Some browsers dispatch ontrack with an empty streams array.
-      // Keep a dedicated MediaStream and attach tracks manually as fallback.
+      // Alcuni browser inviano ontrack con un array streams vuoto.
+      // Si mantiene un MediaStream dedicato e si aggiungono i track manualmente come fallback.
       const fallbackStream = remoteStreamRef.current ?? new MediaStream()
       remoteStreamRef.current = fallbackStream
 
@@ -464,7 +464,7 @@ export function useWebRTC(sendSignaling: SendSignalingFn, options?: UseWebRTCOpt
       }
 
       void pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {
-        // Ignore candidate errors that can happen on reconnect/race paths.
+        // Ignora errori sui candidati che possono verificarsi durante riconnessione o race condition.
       })
       return
     }
