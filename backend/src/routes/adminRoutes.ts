@@ -56,7 +56,7 @@ adminRoutes.post("/admin/users", (req, res) => {
     if (!body) return;
     const created = await createUserByAdmin(body);
     if (!created.ok) {
-      res.status(409).json({ error: "Impossibile creare utente (email duplicata?)" });
+      res.status(409).json({ error: "Impossibile creare utente" });
       return;
     }
 
@@ -127,7 +127,7 @@ adminRoutes.delete("/admin/users/:userId", (req, res) => {
       return;
     }
 
-    const response: ApiMessageResponse = { ok: true, message: "Utente rimosso (soft delete)" };
+    const response: ApiMessageResponse = { ok: true, message: "Utente rimosso" };
     res.status(200).json(response);
   })();
 });
@@ -185,7 +185,7 @@ adminRoutes.patch("/admin/users/:userId/subscription", (req, res) => {
       subscribed: toggled.data,
       message:
         toggled.data === "inactive"
-          ? "Utente disattivato (soft delete)"
+          ? "Utente disattivato"
           : "Utente riattivato",
     };
 

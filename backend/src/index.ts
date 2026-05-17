@@ -2,7 +2,7 @@ import "dotenv/config";
 import http from "http";
 import session from "express-session";
 import { ensureAdminUser } from "./admin/bootstrapAdmin";
-import { createApp } from "./app";
+import { createApp } from "./server";
 import { initWebSocket } from "./websocket/initWebSocket";
 
 const SESSION_COOKIE_NAME = process.env.SESSION_COOKIE_NAME ?? "sid";

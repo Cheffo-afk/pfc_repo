@@ -16,10 +16,16 @@ export function statusDotColor(status: PresenceStatus | undefined): string {
   return '#9e9e9e'
 }
 
-// ______ Formatta timestamp ISO in ora italiana HH:MM ______
+// ______ Formatta timestamp ISO in data/ora italiana GG/MM/AAAA HH:MM ______
 export function formatTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    return new Date(iso).toLocaleString('it-IT', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   } catch {
     return ''
   }
